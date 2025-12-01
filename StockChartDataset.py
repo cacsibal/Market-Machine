@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 
-class StockReturnsDataset(Dataset):
+class StockChartDataset(Dataset):
     def __init__(self, returns, lookback=10, forecast_days=5):
         self.returns = returns
         self.lookback = lookback
@@ -19,7 +19,7 @@ class StockReturnsDataset(Dataset):
     def _create_sequences(self):
         X, y = [], []
 
-        for i in range(len(self.returns) - self.lookback - self.forecast_days):
+        for i in range(0, len(self.returns) - self.lookback - self.forecast_days + 1, self.lookback + self.forecast_days):
             features = self.returns[i:i + self.lookback]
 
             future_returns = self.returns[i + self.lookback:i + self.lookback + self.forecast_days]
