@@ -16,7 +16,7 @@ def display_chart(ticker: str, period: str = '1mo', interval: str = '1d'):
     plt.show()
 
 def get_daily_returns(ticker: str, period: str='1mo', progress=False):
-    df = yf.download(ticker, period=period, interval='1d', progress=progress)['Close']
+    df = yf.download(ticker, period=period, interval='1d', progress=progress, auto_adjust=True)['Close']
     close_prices = df.to_numpy().ravel()
     returns = np.diff(close_prices) / close_prices[:-1] # returns = (P_t - P_{t-1}) / P_{t-1}
 

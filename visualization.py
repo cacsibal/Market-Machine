@@ -1,6 +1,4 @@
 from matplotlib import pyplot as plt
-import pandas as pd
-import yfinance as yf
 from datetime import datetime, timedelta
 
 def plot_mse_loss(train_losses, test_losses):

@@ -7,7 +7,7 @@ import os
 
 from StockReturnsDataset import StockReturnsDataset
 from yfinance_test import get_daily_returns
-from visualization import plot_mse_loss, print_predictions, plot_predictions
+from visualization import plot_mse_loss, print_predictions
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -107,7 +107,7 @@ if __name__ == "__main__":
             train_losses, test_losses = train_model(model, train_loader, test_loader, epochs=100, lr=0.001)
             torch.save(model.state_dict(), model_path)
 
-        df = yf.download(ticker, period='2y', interval='1d', progress=False)['Close']
+        df = yf.download(ticker, period='2y', interval='1d', progress=False, auto_adjust=True)['Close']
         close_prices = df.to_numpy().ravel()
 
         returns = np.diff(close_prices) / close_prices[:-1]
@@ -144,6 +144,8 @@ if __name__ == "__main__":
 
         return predictions
 
-    voo_predictions = predict_stock('VOO', lookback=50)
-    nvda_predictions = predict_stock('NVDA', lookback=50)
-    mu_predictions = predict_stock('MU', lookback=50)
+    lookback = 80
+
+    voo_predictions = predict_stock('VOO', lookback=lookback)
+    nvda_predictions = predict_stock('NVDA', lookback=lookback)
+    mu_predictions = predict_stock('MU', lookback=lookback)
