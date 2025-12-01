@@ -7,6 +7,7 @@ from torch.utils.data import ConcatDataset
 
 from StockChartDataset import StockChartDataset
 from StockLSTM import StockLSTM
+from visualization import plot_feature_chart
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -163,6 +164,7 @@ def train(dataset: ConcatDataset):
         'best_val_loss': best_val_loss
     }
 
+
 if __name__ == "__main__":
     print('hello, world!')
 
@@ -212,46 +214,78 @@ if __name__ == "__main__":
 
     combined_dataset = ConcatDataset(datasets)
 
-    print(f"\nTotal samples: {len(combined_dataset)}")
-
-    # Train the model
-    results = train(combined_dataset)
-
     # Create models directory if it doesn't exist
     Path('models').mkdir(exist_ok=True)
 
-    # Save model weights
-    model_path = 'models/stock_lstm.pt'
-    torch.save(results['model'].state_dict(), model_path)
-    print(f"\nModel saved to {model_path}")
-
-    # Save complete checkpoint with metadata
     checkpoint_path = 'models/stock_lstm_checkpoint.pt'
-    torch.save({
-        'model_state_dict': results['model'].state_dict(),
-        'train_losses': results['train_losses'],
-        'val_losses': results['val_losses'],
-        'test_loss': results['test_loss'],
-        'best_val_loss': results['best_val_loss'],
-        'model_config': {
-            'input_size': 5,
-            'hidden_size': 64,
-            'num_layers': 2
+
+    # Check if model already exists
+    if Path(checkpoint_path).exists():
+        print(f"\nLoading existing model from {checkpoint_path}...")
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+
+        # Recreate model with saved config
+        model = StockLSTM(**checkpoint['model_config']).to(device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+
+        # Create results dict from checkpoint
+        results = {
+            'model': model,
+            'train_losses': checkpoint['train_losses'],
+            'val_losses': checkpoint['val_losses'],
+            'test_loss': checkpoint['test_loss'],
+            'best_val_loss': checkpoint['best_val_loss'],
+            'test_predictions': None,  # Not saved in checkpoint
+            'test_targets': None  # Not saved in checkpoint
         }
-    }, checkpoint_path)
-    print(f"Full checkpoint saved to {checkpoint_path}")
 
-    # Print final metrics
-    print(f"\nFinal Results:")
-    print(f"Best Validation Loss: {results['best_val_loss']:.6f}")
-    print(f"Test Loss: {results['test_loss']:.6f}")
+        print(f"Model loaded successfully!")
+        print(f"Previous Best Validation Loss: {results['best_val_loss']:.6f}")
+        print(f"Previous Test Loss: {results['test_loss']:.6f}")
 
-    # Calculate additional metrics
-    from sklearn.metrics import mean_absolute_error, r2_score
-    mae = mean_absolute_error(results['test_targets'], results['test_predictions'])
-    r2 = r2_score(results['test_targets'], results['test_predictions'])
-    print(f"Test MAE: {mae:.6f}")
-    print(f"Test R^2: {r2:.6f}")
+    else:
+        print("\nNo existing model found. Training new model...")
+        # Train the model
+
+        print(f"\nTotal samples: {len(combined_dataset)}")
+
+        results = train(combined_dataset)
+
+        # Save model weights
+        model_path = 'models/stock_lstm.pt'
+        torch.save(results['model'].state_dict(), model_path)
+        print(f"\nModel saved to {model_path}")
+
+        # Save complete checkpoint with metadata
+        torch.save({
+            'model_state_dict': results['model'].state_dict(),
+            'train_losses': results['train_losses'],
+            'val_losses': results['val_losses'],
+            'test_loss': results['test_loss'],
+            'best_val_loss': results['best_val_loss'],
+            'model_config': {
+                'input_size': 5,
+                'hidden_size': 64,
+                'num_layers': 2
+            }
+        }, checkpoint_path)
+        print(f"Full checkpoint saved to {checkpoint_path}")
+
+        # Print final metrics
+        print(f"\nFinal Results:")
+        print(f"Best Validation Loss: {results['best_val_loss']:.6f}")
+        print(f"Test Loss: {results['test_loss']:.6f}")
+
+        # Calculate additional metrics
+        from sklearn.metrics import mean_absolute_error, r2_score
+
+        mae = mean_absolute_error(results['test_targets'], results['test_predictions'])
+        r2 = r2_score(results['test_targets'], results['test_predictions'])
+        print(f"Test MAE: {mae:.6f}")
+        print(f"Test R^2: {r2:.6f}")
+
+    plot_feature_chart(all_stock_data['AAPL'], ticker_name='AAPL')
 
     # todo:
     # currently, the model trains only on the stock to be predicted.
