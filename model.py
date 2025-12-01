@@ -143,5 +143,7 @@ if __name__ == "__main__":
         return predictions
 
     nvda_predictions = predict_stock('NVDA')
-
     print_predictions('NVDA', nvda_predictions, 5)
+
+    voo_predictions = predict_stock('VOO')
+    print_predictions('VOO', voo_predictions, 5)
