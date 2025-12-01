@@ -7,7 +7,7 @@ import os
 
 from StockReturnsDataset import StockReturnsDataset
 from yfinance_test import get_daily_returns
-from visualization import plot_mse_loss, print_predictions
+from visualization import plot_mse_loss, print_predictions, plot_predictions
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
