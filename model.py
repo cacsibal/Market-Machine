@@ -107,7 +107,7 @@ if __name__ == "__main__":
             train_losses, test_losses = train_model(model, train_loader, test_loader, epochs=100, lr=0.001)
             torch.save(model.state_dict(), model_path)
 
-        df = yf.download(ticker, period='1mo', interval='1d', progress=False)['Close']
+        df = yf.download(ticker, period='2y', interval='1d', progress=False)['Close']
         close_prices = df.to_numpy().ravel()
 
         returns = np.diff(close_prices) / close_prices[:-1]
@@ -140,10 +140,10 @@ if __name__ == "__main__":
 
                 input_sequence = np.append(input_sequence, single_day_return)
 
+        print_predictions(ticker, predictions, forecast_days)
+
         return predictions
 
-    nvda_predictions = predict_stock('NVDA')
-    print_predictions('NVDA', nvda_predictions, 5)
-
-    voo_predictions = predict_stock('VOO')
-    print_predictions('VOO', voo_predictions, 5)
+    voo_predictions = predict_stock('VOO', lookback=50)
+    nvda_predictions = predict_stock('NVDA', lookback=50)
+    mu_predictions = predict_stock('MU', lookback=50)
