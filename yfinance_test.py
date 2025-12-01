@@ -15,4 +15,11 @@ def display_chart(ticker: str, period: str = '1mo', interval: str = '1d'):
     plt.tight_layout()
     plt.show()
 
-display_chart('VTI')
+def get_daily_returns(ticker: str, period: str='1mo', progress=False):
+    df = yf.download(ticker, period=period, interval='1d', progress=progress)['Close']
+    close_prices = df.to_numpy().ravel()
+    returns = np.diff(close_prices) / close_prices[:-1] # returns = (P_t - P_{t-1}) / P_{t-1}
+
+    return returns
+
+print(get_daily_returns('AAPL'))
