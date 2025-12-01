@@ -2,9 +2,11 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 
+
 class StockChartDataset(Dataset):
-    def __init__(self, returns, lookback=10, forecast_days=5):
-        self.returns = returns
+    def __init__(self, data_dict, lookback=10, forecast_days=5):
+        self.normalized_data = data_dict['normalized']
+        self.close_prices = data_dict['close_prices']
         self.lookback = lookback
         self.forecast_days = forecast_days
 
@@ -19,11 +21,14 @@ class StockChartDataset(Dataset):
     def _create_sequences(self):
         X, y = [], []
 
-        for i in range(0, len(self.returns) - self.lookback - self.forecast_days + 1, self.lookback + self.forecast_days):
-            features = self.returns[i:i + self.lookback]
+        for i in range(0, len(self.normalized_data) - self.lookback - self.forecast_days + 1,
+                       self.lookback + self.forecast_days):
+            features = self.normalized_data[i:i + self.lookback]
 
-            future_returns = self.returns[i + self.lookback:i + self.lookback + self.forecast_days]
-            cumulative_return = np.prod(1 + future_returns) - 1
+            start_close = self.close_prices[i + self.lookback - 1]
+            end_close = self.close_prices[i + self.lookback + self.forecast_days - 1]
+
+            cumulative_return = (end_close - start_close) / start_close
 
             X.append(features)
             y.append(cumulative_return)

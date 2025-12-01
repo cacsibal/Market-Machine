@@ -10,7 +10,7 @@ from StockLSTM import StockLSTM
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def build_stock_dataset(ticker: str, period: str='7300d', interval='1d'):
+def build_stock_dataset(ticker: str, period: str = '7300d', interval='1d'):
     stock = yf.Ticker(ticker)
     df = stock.history(period=period, interval=interval)
 
@@ -26,9 +26,15 @@ def build_stock_dataset(ticker: str, period: str='7300d', interval='1d'):
 
     daily_charts = features.astype(np.float32)
 
+    original_close = daily_charts[:, 3].copy()
+
     normalized = normalize_features(daily_charts)
 
-    return normalized
+    # Return dict with both normalized data and original closes
+    return {
+        'normalized': normalized,
+        'close_prices': original_close
+    }
 
 def normalize_features(daily_data):
     normalized = daily_data.copy()
@@ -37,16 +43,17 @@ def normalize_features(daily_data):
         open_price = daily_data[i, 0]
         normalized[i, :4] = (daily_data[i, :4] / open_price) - 1
 
-        if i > 0:
-            recent_volumes = daily_data[max(0, i - 20):i + 1, 4]  # Last 20 days
-            vol_mean = recent_volumes.mean()
-            vol_std = recent_volumes.std()
-            if vol_std > 0:
-                normalized[i, 4] = (daily_data[i, 4] - vol_mean) / vol_std
-            else:
-                normalized[i, 4] = 0
+        if daily_data[i, 4] > 0:
+            normalized[i, 4] = np.log(daily_data[i, 4] + 1)
         else:
             normalized[i, 4] = 0
+
+    # Normalize volume across entire dataset
+    volume_col = normalized[:, 4]
+    vol_mean = volume_col.mean()
+    vol_std = volume_col.std()
+    if vol_std > 0:
+        normalized[:, 4] = (volume_col - vol_mean) / vol_std
 
     return normalized
 
@@ -98,6 +105,7 @@ def train(dataset: ConcatDataset):
             # Backward pass
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             train_loss += loss.item()
