@@ -26,15 +26,14 @@ def build_stock_dataset(ticker: str, period: str = '7300d', interval='1d'):
         return None
 
     daily_charts = features.astype(np.float32)
-
     original_close = daily_charts[:, 3].copy()
-
     normalized = normalize_features(daily_charts)
 
-    # Return dict with both normalized data and original closes
+    # Return dict with dates included
     return {
         'normalized': normalized,
-        'close_prices': original_close
+        'close_prices': original_close,
+        'dates': df.index.tolist()  # Add actual dates
     }
 
 def normalize_features(daily_data):
@@ -58,8 +57,7 @@ def normalize_features(daily_data):
 
     return normalized
 
-
-def train(dataset: ConcatDataset):
+def train(dataset: ConcatDataset, forecast_days=5):
     from torch.utils.data import DataLoader, random_split
 
     # Split data
@@ -78,8 +76,7 @@ def train(dataset: ConcatDataset):
     val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-    # Model
-    model = StockLSTM(input_size=5, hidden_size=64, num_layers=2).to(device)
+    model = StockLSTM(input_size=5, hidden_size=64, num_layers=2, forecast_days=forecast_days).to(device)
 
     # Loss & Optimizer
     criterion = nn.MSELoss()
@@ -100,8 +97,8 @@ def train(dataset: ConcatDataset):
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
 
             # Forward pass
-            predictions = model(X_batch)
-            loss = criterion(predictions, y_batch)
+            predictions = model(X_batch)  # Shape: (batch, forecast_days)
+            loss = criterion(predictions, y_batch)  # y_batch is also (batch, forecast_days)
 
             # Backward pass
             optimizer.zero_grad()
@@ -148,8 +145,8 @@ def train(dataset: ConcatDataset):
             predictions = model(X_batch)
             test_loss += criterion(predictions, y_batch).item()
 
-            all_predictions.extend(predictions.cpu().numpy())
-            all_targets.extend(y_batch.cpu().numpy())
+            all_predictions.append(predictions.cpu().numpy())
+            all_targets.append(y_batch.cpu().numpy())
 
     avg_test_loss = test_loss / len(test_loader)
     print(f"\nTest Loss: {avg_test_loss:.6f}")
@@ -159,11 +156,10 @@ def train(dataset: ConcatDataset):
         'train_losses': train_losses,
         'val_losses': val_losses,
         'test_loss': avg_test_loss,
-        'test_predictions': np.array(all_predictions),
-        'test_targets': np.array(all_targets),
+        'test_predictions': np.concatenate(all_predictions, axis=0),  # Shape: (num_samples, forecast_days)
+        'test_targets': np.concatenate(all_targets, axis=0),  # Shape: (num_samples, forecast_days)
         'best_val_loss': best_val_loss
     }
-
 
 if __name__ == "__main__":
     print('hello, world!')
@@ -257,7 +253,6 @@ if __name__ == "__main__":
         torch.save(results['model'].state_dict(), model_path)
         print(f"\nModel saved to {model_path}")
 
-        # Save complete checkpoint with metadata
         torch.save({
             'model_state_dict': results['model'].state_dict(),
             'train_losses': results['train_losses'],
@@ -267,23 +262,28 @@ if __name__ == "__main__":
             'model_config': {
                 'input_size': 5,
                 'hidden_size': 64,
-                'num_layers': 2
+                'num_layers': 2,
+                'forecast_days': 5
             }
         }, checkpoint_path)
         print(f"Full checkpoint saved to {checkpoint_path}")
 
-        # Print final metrics
         print(f"\nFinal Results:")
         print(f"Best Validation Loss: {results['best_val_loss']:.6f}")
         print(f"Test Loss: {results['test_loss']:.6f}")
 
-        # Calculate additional metrics
         from sklearn.metrics import mean_absolute_error, r2_score
 
-        mae = mean_absolute_error(results['test_targets'], results['test_predictions'])
-        r2 = r2_score(results['test_targets'], results['test_predictions'])
-        print(f"Test MAE: {mae:.6f}")
-        print(f"Test R^2: {r2:.6f}")
+        print(f"\nPer-day metrics:")
+        for day in range(5):
+            mae = mean_absolute_error(results['test_targets'][:, day], results['test_predictions'][:, day])
+            r2 = r2_score(results['test_targets'][:, day], results['test_predictions'][:, day])
+            print(f"  Day {day + 1}: MAE = {mae:.6f} ({mae * 100:.2f}%), R² = {r2:.6f}")
+
+        # Overall metrics
+        mae_overall = mean_absolute_error(results['test_targets'].flatten(), results['test_predictions'].flatten())
+        r2_overall = r2_score(results['test_targets'].flatten(), results['test_predictions'].flatten())
+        print(f"\nOverall: MAE = {mae_overall:.6f} ({mae_overall * 100:.2f}%), R² = {r2_overall:.6f}")
 
     plot_feature_chart(all_stock_data['AAPL'], ticker_name='AAPL')
 

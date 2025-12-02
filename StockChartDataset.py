@@ -25,12 +25,12 @@ class StockChartDataset(Dataset):
                        self.lookback + self.forecast_days):
             features = self.normalized_data[i:i + self.lookback]
 
-            start_close = self.close_prices[i + self.lookback - 1]
-            end_close = self.close_prices[i + self.lookback + self.forecast_days - 1]
+            future_closes = self.close_prices[i + self.lookback:i + self.lookback + self.forecast_days]
 
-            cumulative_return = (end_close - start_close) / start_close
+            last_known_close = self.close_prices[i + self.lookback - 1]
+            normalized_future = (future_closes - last_known_close) / last_known_close
 
             X.append(features)
-            y.append(cumulative_return)
+            y.append(normalized_future)
 
         return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)

@@ -17,48 +17,60 @@ def plot_feature_chart(data_dict, start_idx=0, num_days=30, ticker_name="Stock")
     Plot OHLCV features from the dataset.
 
     Args:
-        data_dict: Dictionary with 'normalized' and 'close_prices' keys
+        data_dict: Dictionary with 'normalized', 'close_prices', and 'dates' keys
         start_idx: Starting index for the plot
         num_days: Number of days to plot
         ticker_name: Name of the stock for the title
     """
     normalized = data_dict['normalized']
     close_prices = data_dict['close_prices']
+    dates = data_dict.get('dates', None)  # Get dates if available
 
     # Get the slice to plot
     end_idx = min(start_idx + num_days, len(normalized))
     plot_data = normalized[start_idx:end_idx]
     plot_closes = close_prices[start_idx:end_idx]
 
+    if dates is not None:
+        plot_dates = dates[start_idx:end_idx]
+    else:
+        plot_dates = np.arange(len(plot_data))
+
     # Create figure with subplots
     fig, axes = plt.subplots(3, 1, figsize=(14, 10))
-    fig.suptitle(f'{ticker_name} - Features (Days {start_idx} to {end_idx})', fontsize=16)
 
-    days = np.arange(len(plot_data))
+    if dates is not None:
+        fig.suptitle(
+            f'{ticker_name} - Features ({plot_dates[0].strftime("%Y-%m-%d")} to {plot_dates[-1].strftime("%Y-%m-%d")})',
+            fontsize=16)
+    else:
+        fig.suptitle(f'{ticker_name} - Features (Days {start_idx} to {end_idx})', fontsize=16)
 
     # Plot 1: Normalized OHLC
     ax1 = axes[0]
-    ax1.plot(days, plot_data[:, 0], label='Open (normalized)', alpha=0.7)
-    ax1.plot(days, plot_data[:, 1], label='High (normalized)', alpha=0.7)
-    ax1.plot(days, plot_data[:, 2], label='Low (normalized)', alpha=0.7)
-    ax1.plot(days, plot_data[:, 3], label='Close (normalized)', alpha=0.7, linewidth=2)
+    ax1.plot(plot_dates, plot_data[:, 0], label='Open (normalized)', alpha=0.7)
+    ax1.plot(plot_dates, plot_data[:, 1], label='High (normalized)', alpha=0.7)
+    ax1.plot(plot_dates, plot_data[:, 2], label='Low (normalized)', alpha=0.7)
+    ax1.plot(plot_dates, plot_data[:, 3], label='Close (normalized)', alpha=0.7, linewidth=2)
     ax1.set_ylabel('Normalized Price')
     ax1.set_title('Normalized OHLC (relative to daily open)')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     ax1.axhline(y=0, color='k', linestyle='--', alpha=0.3)
+    if dates is not None:
+        fig.autofmt_xdate()  # Auto-format date labels
 
     # Plot 2: Actual Close Prices
     ax2 = axes[1]
-    ax2.plot(days, plot_closes, color='blue', linewidth=2)
+    ax2.plot(plot_dates, plot_closes, color='blue', linewidth=2)
     ax2.set_ylabel('Close Price ($)')
     ax2.set_title('Actual Close Prices')
     ax2.grid(True, alpha=0.3)
 
     # Plot 3: Normalized Volume
     ax3 = axes[2]
-    ax3.bar(days, plot_data[:, 4], alpha=0.6, color='purple')
-    ax3.set_xlabel('Days')
+    ax3.bar(plot_dates, plot_data[:, 4], alpha=0.6, color='purple')
+    ax3.set_xlabel('Date' if dates else 'Days')
     ax3.set_ylabel('Normalized Volume')
     ax3.set_title('Normalized Volume (z-score)')
     ax3.grid(True, alpha=0.3)
