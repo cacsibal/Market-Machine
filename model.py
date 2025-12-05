@@ -266,17 +266,7 @@ if __name__ == "__main__":
     print('hello, world!')
 
     tickers = [
-        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'VOO',
-        'NVDA', 'META', 'NFLX', 'ADBE', 'CRM', 'ORCL', 'INTC', 'AMD', 'CSCO', 'AVGO',
-        'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'BLK', 'SCHW', 'AXP', 'V', 'MA',
-        'UNH', 'JNJ', 'PFE', 'ABBV', 'MRK', 'TMO', 'ABT', 'LLY', 'BMY', 'AMGN',
-        'WMT', 'HD', 'MCD', 'NKE', 'SBUX', 'TGT', 'LOW', 'COST', 'DIS', 'PG', 'KO', 'PEP',
-        'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC',
-        'BA', 'CAT', 'GE', 'HON', 'UPS', 'UNP', 'MMM', 'LMT', 'RTX',
-        'T', 'VZ', 'CMCSA', 'TMUS',
-        'AMT', 'PLD', 'SPG',
-        'SPY', 'QQQ', 'IWM', 'DIA',
-        'MU'
+        'NVDA', 'INTC', 'MU', 'TSM', 'TXN', 'AVGO'
     ]
 
     all_stock_data = {}
@@ -348,7 +338,7 @@ if __name__ == "__main__":
 
     # plot_feature_chart(all_stock_data['AAPL'], ticker_name='AAPL')
 
-    for ticker in ['NVDA', 'TSLA', 'AVGO', 'MU']:
+    for ticker in ['NVDA', 'AVGO', 'MU']:
         # print("\n=== Testing Predictions on Historical Data ===")
         # prediction_results = predict(
         #     model=results['model'],
