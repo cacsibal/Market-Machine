@@ -5,6 +5,7 @@ import torch.nn as nn
 import yfinance as yf
 
 from StockDataset import StockDataset
+from visualization import visualize_test
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -161,12 +162,17 @@ if __name__ == "__main__":
 
     trained_model = train_model(model, train_loader, test_loader, epochs=epochs, epsilon=epsilon, lambda_reg=lambda_reg)
 
-    sample = testing_samples[0][0]
-    mean = testing_samples[1][0]
-    std = testing_samples[2][0]
+    for i in range(5):
+        sample = testing_samples[0][i]
+        mean = testing_samples[1][i]
+        std = testing_samples[2][i]
 
-    preds = predict(trained_model, sample, mean, std, forecast_days=forecast_days)
-    print("Predicted next 5 days:", preds)
+        preds = predict(trained_model, sample, mean, std, forecast_days=forecast_days)
+        actuals = sample[lookback:, 3]
+        print("Predicted next 5 days:", preds)
+        print("Actual next 5 days:", actuals)
+
+        visualize_test(preds, actuals)
 
 # i changed the code to normalize each sample independent of each other, but right now the predictions all look the same
 # the test loss is also much smaller than the train loss
