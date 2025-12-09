@@ -74,6 +74,7 @@ def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.01, lambd
 
     return model
 
+
 def get_samples(ticker: str, period='2y', lookback=10, forecast_days=5):
     data = yf.download(ticker, period=period, auto_adjust=True)
     prices = data.values
@@ -82,12 +83,16 @@ def get_samples(ticker: str, period='2y', lookback=10, forecast_days=5):
 
     samples, means, stds = [], [], []
     for i in range(len(prices) - sample_len + 1):
-        sample = prices[i:i + sample_len]
+        sample_window = prices[i: i + sample_len]
 
-        mean = sample.mean()
-        std = sample.std(ddof=0)
+        input_portion = sample_window[:lookback]
 
-        norm_sample = (sample - mean) / std
+        mean = input_portion.mean(axis=0)
+        std = input_portion.std(axis=0, ddof=0)
+
+        std[std == 0] = 1.0
+
+        norm_sample = (sample_window - mean) / std
 
         samples.append(norm_sample)
         means.append(mean)
@@ -95,7 +100,7 @@ def get_samples(ticker: str, period='2y', lookback=10, forecast_days=5):
 
     return np.array(samples), np.array(means), np.array(stds)
 
-def predict(model, sample, mean, std, forecast_days=5):
+def predict(model, sample, mean, std, lookback=10, forecast_days=5):
     model.eval()
     with torch.no_grad():
         x = torch.tensor(sample[:lookback], dtype=torch.float32).unsqueeze(0).to(device)
@@ -103,7 +108,7 @@ def predict(model, sample, mean, std, forecast_days=5):
         preds = model(x)
         preds = preds.squeeze(0).cpu().numpy()
 
-        preds_denorm = preds * std + mean
+        preds_denorm = preds * std[3] + mean[3]
 
     return preds
 
@@ -167,12 +172,15 @@ if __name__ == "__main__":
         mean = testing_samples[1][i]
         std = testing_samples[2][i]
 
-        preds = predict(trained_model, sample, mean, std, forecast_days=forecast_days)
-        actuals = sample[lookback:, 3]
-        print("Predicted next 5 days:", preds)
-        print("Actual next 5 days:", actuals)
+        preds = predict(trained_model, sample, mean, std, lookback=lookback, forecast_days=forecast_days)
 
-        visualize_test(preds, actuals)
+        actuals_norm = sample[lookback:, 3]
+        actuals = actuals_norm * std[3] + mean[3]
+
+        print("Predicted next 5 days:", preds)
+        print("Actual next 5 days:", actuals_norm)
+
+        visualize_test(preds, actuals_norm)
 
 # i changed the code to normalize each sample independent of each other, but right now the predictions all look the same
 # the test loss is also much smaller than the train loss
