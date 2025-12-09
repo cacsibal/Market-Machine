@@ -5,117 +5,106 @@ import torch.nn as nn
 import yfinance as yf
 
 from StockDataset import StockDataset
-from visualization import visualize_test
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class StockLSTM(nn.Module):
     def __init__(self, input_size=5, hidden_size=128, num_layers=3, forecast_days=5, dropout=0.2):
-        super().__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers,
-                           batch_first=True, dropout=dropout)
-        self.fc1 = nn.Linear(hidden_size, hidden_size // 2)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(hidden_size // 2, forecast_days)
+        super(StockLSTM, self).__init__()
+
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout
+        )
+
+        self.fc = nn.Linear(hidden_size, forecast_days)
 
     def forward(self, x):
-        out, _ = self.lstm(x)
-        out = self.fc1(out[:, -1, :])
-        out = self.relu(out)
-        out = self.dropout(out)
-        return self.fc2(out)
+        lstm_out, _ = self.lstm(x)
+        last_hidden = lstm_out[:, -1, :]
+
+        out = self.fc(last_hidden)
+
+        return out
+
 
 def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.01, lambda_reg=0.01):
+    model = model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=epsilon)
     criterion = nn.MSELoss()
-
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=epsilon,
-        weight_decay=lambda_reg
-    )
-
-    model.to(device)
 
     for epoch in range(epochs):
         model.train()
-
-        train_loss = 0
-
-        for batch_idx, (features, targets) in enumerate(train_loader):
-            features, targets = features.to(device), targets.to(device)
+        train_loss = 0.0
+        for x, y, mean, std in train_loader:
+            x, y = x.to(device), y.to(device)
 
             optimizer.zero_grad()
+            preds = model(x)
 
-            predictions = model(features)
-            loss = criterion(predictions, targets)
+            loss = criterion(preds, y)
+
+            l2_reg = sum(torch.sum(p ** 2) for p in model.parameters())
+            loss = loss + lambda_reg * l2_reg
 
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item()
+            train_loss += loss.item() * x.size(0)
 
-        avg_loss = train_loss / len(train_loader)
+        train_loss /= len(train_loader.dataset)
 
         model.eval()
-        test_loss = 0
-
+        test_loss = 0.0
         with torch.no_grad():
-            for features, targets in test_loader:
-                features, targets = features.to(device), targets.to(device)
+            for x, y, mean, std in test_loader:
+                x, y = x.to(device), y.to(device)
+                preds = model(x)
 
-                predictions = model(features)
-                loss = criterion(predictions, targets)
+                loss = criterion(preds, y)
+                test_loss += loss.item() * x.size(0)
 
-                test_loss += loss.item()
+            test_loss /= len(test_loader.dataset)
 
-        avg_test_loss = test_loss / len(test_loader)
-
-        print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_loss:.4f}, Test Loss: {avg_test_loss:.4f}")
+        print(f"Epoch {epoch+1}/{epochs} | Train Loss: {train_loss:.6f} | Test Loss: {test_loss:.6f}")
 
     return model
 
-def get_ohlcv(tickers: list[str], period='1mo', interval='1d'):
-    if isinstance(tickers, str):
-        tickers = [tickers]
+def get_samples(ticker: str, period='2y', lookback=10, forecast_days=5):
+    data = yf.download(ticker, period=period, auto_adjust=True)
+    prices = data.values
 
-    all_data = []
+    sample_len = lookback + forecast_days
 
-    for t in tickers:
-        df = yf.download(t, period=period, interval=interval, progress=False, auto_adjust=True)
-        all_data.append(df.to_numpy())
+    samples, means, stds = [], [], []
+    for i in range(len(prices) - sample_len + 1):
+        sample = prices[i:i + sample_len]
 
-    return np.vstack(all_data) if all_data else np.array([])
+        mean = sample.mean()
+        std = sample.std(ddof=0)
 
-def predict(model, dataset, num_predictions=5):
+        norm_sample = (sample - mean) / std
+
+        samples.append(norm_sample)
+        means.append(mean)
+        stds.append(std)
+
+    return np.array(samples), np.array(means), np.array(stds)
+
+def predict(model, sample, mean, std, forecast_days=5):
     model.eval()
-    model.to(device)
-
-    predictions_list = []
-    actuals_list = []
-
     with torch.no_grad():
-        for i in range(min(num_predictions, len(dataset))):
-            features, targets = dataset[i]
-            features = features.unsqueeze(0).to(device)
+        x = torch.tensor(sample[:lookback], dtype=torch.float32).unsqueeze(0).to(device)
 
-            prediction = model(features)
+        preds = model(x)
+        preds = preds.squeeze(0).cpu().numpy()
 
-            predictions_list.append(prediction.cpu().numpy()[0])
-            actuals_list.append(targets.numpy())
+        preds_denorm = preds * std + mean
 
-    return np.array(predictions_list), np.array(actuals_list)
-
-
-def predict_future(model, recent_data, forecast_days=5):
-    model.eval()
-    model.to(device)
-
-    with torch.no_grad():
-        features = torch.tensor(recent_data, dtype=torch.float32).unsqueeze(0).to(device)
-        predictions = model(features)
-
-    return predictions.cpu().numpy()[0]
+    return preds
 
 if __name__ == "__main__":
     print('hello, world!')
@@ -123,30 +112,47 @@ if __name__ == "__main__":
     # hyperparameters
     lookback = 10
     forecast_days = 5
-
     hidden_size = 128
-
     batch_size = 32
-    epochs = 50
+    epochs = 10
     epsilon = 0.01
     lambda_reg = 0.01
 
     tickers = ['AAPL', 'MSFT', 'AMZN', 'GOOGL']
 
-    ohlcv = get_ohlcv(tickers, period='2y', interval='1d')
-    print(len(ohlcv))
+    print(f"Number of stocks: {len(tickers)}")
 
-    train_size = int(len(ohlcv) * 0.8)
-    train_ohlcv = ohlcv[:train_size]
-    test_ohlcv = ohlcv[train_size:]
+    all_samples, all_means, all_stds = {}, {}, {}
 
-    d_train = StockDataset(train_ohlcv, lookback=lookback, forecast_days=forecast_days)
-    d_test = StockDataset(test_ohlcv, lookback=lookback, forecast_days=forecast_days)
+    for ticker in tickers:
+        samples, means, stds = get_samples(
+            ticker,
+            period='2y',
+            lookback=lookback,
+            forecast_days=forecast_days
+        )
+        all_samples[ticker] = samples
+        all_means[ticker] = means
+        all_stds[ticker] = stds
 
-    print(
-        f"Total training examples: {len(d_train)}\n",
-        f"Total test examples: {len(d_test)}"
-    )
+    X = np.concatenate(list(all_samples.values()), axis=0)
+    M = np.concatenate(list(all_means.values()), axis=0)
+    S = np.concatenate(list(all_stds.values()), axis=0)
+
+    print(np.shape(X), np.shape(M), np.shape(S))
+
+    num_training_samples = int(0.8*len(X))
+
+    training_samples = [X[:num_training_samples], M[:num_training_samples], S[:num_training_samples]]
+    testing_samples = [X[num_training_samples:], M[num_training_samples:], S[num_training_samples:]]
+
+    print(np.shape(training_samples[0]), np.shape(testing_samples[0]))
+
+    d_train = StockDataset(training_samples, lookback=lookback, forecast_days=forecast_days)
+    d_test = StockDataset(testing_samples, lookback=lookback, forecast_days=forecast_days)
+
+    print(f"Total training examples: {len(d_train)}")
+    print(f"Total test examples: {len(d_test)}")
 
     train_loader = DataLoader(d_train, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(d_test, batch_size=batch_size, shuffle=False)
@@ -155,28 +161,12 @@ if __name__ == "__main__":
 
     trained_model = train_model(model, train_loader, test_loader, epochs=epochs, epsilon=epsilon, lambda_reg=lambda_reg)
 
-    predictions, actuals = predict(trained_model, d_test, num_predictions=86)
+    sample = testing_samples[0][0]
+    mean = testing_samples[1][0]
+    std = testing_samples[2][0]
 
-    print(f"Predictions shape: {predictions.shape}")
-    print(f"Actuals shape: {actuals.shape}")
+    preds = predict(trained_model, sample, mean, std, forecast_days=forecast_days)
+    print("Predicted next 5 days:", preds)
 
-    predictions_dollars = []
-    actuals_dollars = []
-
-    for i in range(len(predictions)):
-        current_price = test_ohlcv[i + lookback - 1, 3]
-
-        pred_prices = current_price * (1 + predictions[i])
-        actual_prices = current_price * (1 + actuals[i])
-
-        predictions_dollars.append(pred_prices)
-        actuals_dollars.append(actual_prices)
-
-    predictions_dollars = np.array(predictions_dollars)
-    actuals_dollars = np.array(actuals_dollars)
-
-    print(f"\nFirst 5 predictions in dollars: {predictions_dollars[:5]}")
-    print(f"First 5 actuals in dollars: {actuals_dollars[:5]}")
-    print(predictions_dollars[:5])
-
-    [visualize_test(predictions_dollars[i], actuals_dollars[i]) for i in range(5)]
+# i changed the code to normalize each sample independent of each other, but right now the predictions all look the same
+# the test loss is also much smaller than the train loss
