@@ -74,7 +74,6 @@ def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.01, lambd
 
     return model
 
-
 def get_samples(ticker: str, period='2y', lookback=10, forecast_days=5):
     data = yf.download(ticker, period=period, auto_adjust=True)
     prices = data.values
@@ -120,15 +119,14 @@ if __name__ == "__main__":
     forecast_days = 5
     hidden_size = 128
     batch_size = 32
-    epochs = 2
+    epochs = 10
     epsilon = 0.01
     lambda_reg = 1e-7
 
-    data_collection_period = '5y'
+    data_collection_period = '1y'
 
     tickers = [
-        'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META', 'SPY', 'RTX', 'PLTR', 'NVDA',
-        'V', 'TSLA', 'WMT', 'IBM', 'ORCL', 'MA', 'JNJ', 'NFLX', 'AVGO', 'CSCO'
+        'SPY', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLRE', 'XLU', 'XLC', 'SOXX' # sector etfs
     ]
 
     print(f"Number of stocks: {len(tickers)}")
