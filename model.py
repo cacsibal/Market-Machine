@@ -70,19 +70,25 @@ def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.01, lambd
 
             test_loss /= len(test_loader.dataset)
 
-        print(f"Epoch {epoch+1}/{epochs} | Train Loss: {train_loss:.6f} | Test Loss: {test_loss:.6f} | Difference: {train_loss - test_loss:.6f}")
+        train_dollar_loss = np.sqrt(train_loss)
+        test_dollar_loss = np.sqrt(test_loss)
+        print(f"Epoch {epoch+1}/{epochs} | Train Dollar Loss: ${train_dollar_loss:.2f} | Test Dollar Loss: ${test_dollar_loss:.2f} | Difference: ${train_dollar_loss - test_dollar_loss:.2f}")
+
+        # print(f"Epoch {epoch+1}/{epochs} | Train Loss: {train_loss:.6f} | Test Loss: {test_loss:.6f} | Difference: {train_loss - test_loss:.6f}")
 
     return model
 
 def get_samples(ticker: str, period='2y', lookback=10, forecast_days=5):
     data = yf.download(ticker, period=period, auto_adjust=True)
     prices = data.values
+    dates = data.index.strftime('%Y-%m-%d').tolist()
 
     sample_len = lookback + forecast_days
 
-    samples, means, stds = [], [], []
+    samples, means, stds, sample_dates, sample_tickers = [], [], [], [], []
     for i in range(len(prices) - sample_len + 1):
         sample_window = prices[i: i + sample_len]
+        date_window = dates[i: i + sample_len]
 
         input_portion = sample_window[:lookback]
 
@@ -96,8 +102,10 @@ def get_samples(ticker: str, period='2y', lookback=10, forecast_days=5):
         samples.append(norm_sample)
         means.append(mean)
         stds.append(std)
+        sample_dates.append(date_window)
+        sample_tickers.append(ticker)
 
-    return np.array(samples), np.array(means), np.array(stds)
+    return np.array(samples), np.array(means), np.array(stds), np.array(sample_dates), np.array(sample_tickers) # Return sample_tickers
 
 def predict(model, sample, mean, std, lookback=10, forecast_days=5):
     model.eval()
@@ -115,7 +123,7 @@ if __name__ == "__main__":
     print('hello, world!')
 
     # hyperparameters
-    lookback = 80
+    lookback = 60
     forecast_days = 5
     hidden_size = 128
     batch_size = 32
@@ -123,23 +131,28 @@ if __name__ == "__main__":
     epsilon = 0.01
     lambda_reg = 1e-7
 
-    data_collection_period = '1y'
+    data_collection_period = '5y'
+    proportion_training = 0.8
 
     tickers = [
         # sector etfs
-        'SPY', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLRE', 'XLU', 'XLC', 'SOXX', 
-        # Tech Giants
+        'SPY', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLRE', 'XLU', 'XLC', 'SOXX', 'QTUM'
+    ]
+
+    tech = [
         'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'GOOG', 'META', 'NVDA', 'TSLA', 'AVGO', 'ORCL',
-        # Quantum Computing
+    ]
+
+    quantum = [
         'IONQ', 'RGTI', 'QBTS', 'ARQQ', 'QUBT'
     ]
 
     print(f"Number of stocks: {len(tickers)}")
 
-    all_samples, all_means, all_stds = {}, {}, {}
+    all_samples, all_means, all_stds, all_dates, all_tickers = {}, {}, {}, {}, {}
 
     for ticker in tickers:
-        samples, means, stds = get_samples(
+        samples, means, stds, dates, sample_tickers = get_samples(
             ticker,
             period=data_collection_period,
             lookback=lookback,
@@ -148,23 +161,29 @@ if __name__ == "__main__":
         all_samples[ticker] = samples
         all_means[ticker] = means
         all_stds[ticker] = stds
+        all_dates[ticker] = dates
+        all_tickers[ticker] = sample_tickers
 
     X = np.concatenate(list(all_samples.values()), axis=0)
     M = np.concatenate(list(all_means.values()), axis=0)
     S = np.concatenate(list(all_stds.values()), axis=0)
+    D = np.concatenate(list(all_dates.values()), axis=0)
+    T = np.concatenate(list(all_tickers.values()), axis=0)
 
     perm = np.random.permutation(len(X))
 
     X_shuffled = X[perm]
     M_shuffled = M[perm]
     S_shuffled = S[perm]
+    D_shuffled = D[perm]
+    T_shuffled = T[perm]
 
-    print(np.shape(X), np.shape(M), np.shape(S))
+    print(np.shape(X), np.shape(M), np.shape(S), np.shape(D), np.shape(T))
 
-    num_training_samples = int(0.8*len(X))
+    num_training_samples = int(proportion_training*len(X))
 
-    training_samples = [X_shuffled[:num_training_samples], M_shuffled[:num_training_samples], S_shuffled[:num_training_samples]]
-    testing_samples = [X_shuffled[num_training_samples:], M_shuffled[num_training_samples:], S_shuffled[num_training_samples:]]
+    training_samples = [X_shuffled[:num_training_samples], M_shuffled[:num_training_samples], S_shuffled[:num_training_samples], D_shuffled[:num_training_samples], T_shuffled[:num_training_samples]]
+    testing_samples = [X_shuffled[num_training_samples:], M_shuffled[num_training_samples:], S_shuffled[num_training_samples:], D_shuffled[num_training_samples:], T_shuffled[num_training_samples:]]
 
     print(np.shape(training_samples[0]), np.shape(testing_samples[0]))
 
@@ -185,16 +204,25 @@ if __name__ == "__main__":
         sample = testing_samples[0][i]
         mean = testing_samples[1][i]
         std = testing_samples[2][i]
+        dates = testing_samples[3][i]
+        viz_ticker = testing_samples[4][i]
 
         preds = predict(trained_model, sample, mean, std, lookback=lookback, forecast_days=forecast_days)
 
         actuals_norm = sample[lookback:, 3]
         actuals = actuals_norm * std[3] + mean[3]
 
+        historical_norm = sample[max(0, lookback - 20):lookback, 3]
+        historical_prices = historical_norm * std[3] + mean[3]
+
+        historical_dates = dates[max(0, lookback - 20):lookback].tolist()
+        prediction_dates = dates[lookback:].tolist()
+        plot_dates = historical_dates + prediction_dates
+
+
+        print(f"--- Visualization Sample {i+1} ({viz_ticker}) ---")
         print("Predicted next 5 days:", preds)
         print("Actual next 5 days:", actuals)
+        print("Dates:", prediction_dates)
 
-        visualize_test(preds, actuals)
-
-# i changed the code to normalize each sample independent of each other, but right now the predictions all look the same
-# the test loss is also much smaller than the train loss
+        visualize_test(preds, actuals, historical_prices, dates=plot_dates, ticker=viz_ticker)

@@ -4,12 +4,14 @@ from torch.utils.data import Dataset
 class StockDataset(Dataset):
     def __init__(self, dataset, lookback=10, forecast_days=5):
         """
-        dataset: 3-tuple [X, M, S]
+        dataset: 5-tuple [X, M, S, D, T]
             X: np.array of shape (num_samples, lookback+forecast_days, 5)
             M: np.array of shape (num_samples,)
             S: np.array of shape (num_samples,)
+            D: np.array of shape (num_samples,)
+            T: np.array of shape (num_samples,)
         """
-        self.X, self.M, self.S = dataset
+        self.X, self.M, self.S, self.D, self.T = dataset
         self.lookback = lookback
         self.forecast_days = forecast_days
 
