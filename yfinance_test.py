@@ -23,7 +23,7 @@ def get_daily_returns(ticker: str, period: str='1mo', progress=False):
     return returns
 
 def get_samples(ticker: str, period='2y', lookback=10, forecast_days=5):
-    data = yf.download(ticker, period=period, auto_adjust=True)
+    data = yf.download(ticker, period=period, auto_adjust=True, progress=False)
     prices = data.values
     dates = data.index.strftime('%Y-%m-%d').tolist()
 
