@@ -64,7 +64,7 @@ def load_model(filepath, input_size=5, hidden_size=128, forecast_days=5, num_lay
 
 def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.005, lambda_reg=0.0001):
     model = model.to(device)
-    optimizer = torch.optim.SGD(model.parameters(), lr=epsilon)
+    optimizer = torch.optim.Adam(model.parameters(), lr=epsilon)
     criterion = nn.MSELoss()
 
     for epoch in range(epochs):
