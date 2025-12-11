@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 class StockLSTM(nn.Module):
-    def __init__(self, input_size=5, hidden_size=128, num_layers=3, forecast_days=5, dropout=0.2):
+    def __init__(self, input_size=5, hidden_size=128, num_layers=4, forecast_days=5, dropout=0.2):
         super(StockLSTM, self).__init__()
 
         self.lstm = nn.LSTM(

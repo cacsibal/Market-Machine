@@ -258,6 +258,7 @@ if __name__ == "__main__":
     epochs = 15
     epsilon = 0.01
     lambda_reg = 1e-7
+    num_layers = 3
 
     data_collection_period = '5y'
     training_proportion = 0.8
@@ -273,7 +274,7 @@ if __name__ == "__main__":
         'input_size': 5,
         'hidden_size': hidden_size,
         'forecast_days': forecast_days,
-        'num_layers': 3,
+        'num_layers': num_layers,
         'dropout': 0.2,
         'lookback': lookback,
         'tickers': tickers,
@@ -283,10 +284,10 @@ if __name__ == "__main__":
         'lambda_reg': lambda_reg,
     }
 
-    retrain = False
+    retrain = True
 
     if retrain:
-        model = StockLSTM(input_size=5, hidden_size=hidden_size, forecast_days=forecast_days)
+        model = StockLSTM(input_size=5, hidden_size=hidden_size, num_layers=num_layers, forecast_days=forecast_days)
 
         train_loader, test_loader, testing_samples = get_loaders(
             tickers, training_proportion,

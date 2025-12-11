@@ -137,7 +137,7 @@ def visualize_pca(model, data_loader, lookback=60, input_size=5):
     X_flat = np.concatenate(all_inputs, axis=0)
     y_pred = np.concatenate(all_preds, axis=0)
 
-    pca = PCA(n_components=3)
+    pca = PCA(n_components=2)
     X_pca = pca.fit_transform(X_flat)
 
     x_min, x_max = X_pca[:, 0].min(), X_pca[:, 0].max()
