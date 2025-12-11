@@ -5,7 +5,6 @@ import torch.nn as nn
 import os
 import time
 from datetime import datetime
-from scipy.optimize import minimize, differential_evolution
 
 from StockDataset import StockDataset
 from StockLSTM import StockLSTM
@@ -14,33 +13,30 @@ from yfinance_test import get_samples
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# Directory for saving models
 MODELS_DIR = 'saved_models'
 
-
 def save_model(model, filepath, hyperparams=None):
-    
+
     os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else MODELS_DIR, exist_ok=True)
-    
+
     save_dict = {
         'model_state_dict': model.state_dict(),
         'timestamp': datetime.now().isoformat(),
     }
-    
+
     if hyperparams:
         save_dict['hyperparams'] = hyperparams
-    
+
     torch.save(save_dict, filepath)
     print(f"Model saved to: {filepath}")
 
-
 def load_model(filepath, input_size=5, hidden_size=128, forecast_days=5, num_layers=3, dropout=0.2):
-    
+
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"No saved model found at: {filepath}")
-    
+
     checkpoint = torch.load(filepath, map_location=device, weights_only=False)
-    
+
     # Use saved hyperparams if available
     if 'hyperparams' in checkpoint:
         hp = checkpoint['hyperparams']
@@ -49,7 +45,7 @@ def load_model(filepath, input_size=5, hidden_size=128, forecast_days=5, num_lay
         forecast_days = hp.get('forecast_days', forecast_days)
         num_layers = hp.get('num_layers', num_layers)
         dropout = hp.get('dropout', dropout)
-    
+
     model = StockLSTM(
         input_size=input_size,
         hidden_size=hidden_size,
@@ -57,19 +53,18 @@ def load_model(filepath, input_size=5, hidden_size=128, forecast_days=5, num_lay
         num_layers=num_layers,
         dropout=dropout
     )
-    
+
     model.load_state_dict(checkpoint['model_state_dict'])
     model = model.to(device)
-    
+
     timestamp = checkpoint.get('timestamp', 'unknown')
     print(f"Model loaded from: {filepath} (saved at: {timestamp})")
-    
-    return model
 
+    return model
 
 def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.005, lambda_reg=0.0001):
     model = model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=epsilon)
+    optimizer = torch.optim.SGD(model.parameters(), lr=epsilon)
     criterion = nn.MSELoss()
 
     for epoch in range(epochs):
@@ -115,10 +110,8 @@ def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.005, lamb
 
     return model
 
-
 def tune_model(model, tickers: list[str], training_proportion=0.8, period='1y', lookback=10, forecast_days=5,
                epochs=2, epsilon=0.01, lambda_reg=0.0001, save_path=None, model_name=None):
-    
     train_loader, test_loader, _ = get_loaders(
         tickers,
         training_proportion=training_proportion,
@@ -135,17 +128,16 @@ def tune_model(model, tickers: list[str], training_proportion=0.8, period='1y', 
         lambda_reg=lambda_reg
     )
 
-    # Save tuned model
     if model_name is None:
-        ticker_str = '_'.join(tickers[:3])  # Use first 3 tickers in name
+        ticker_str = '_'.join(tickers[:3])  # use first 3 tickers in name
         if len(tickers) > 3:
             ticker_str += f'_+{len(tickers) - 3}more'
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         model_name = f"tuned_{ticker_str}_{timestamp}"
-    
+
     if save_path is None:
         save_path = os.path.join(MODELS_DIR, f"{model_name}.pt")
-    
+
     hyperparams = {
         'input_size': 5,
         'hidden_size': model.lstm.hidden_size,
@@ -159,15 +151,10 @@ def tune_model(model, tickers: list[str], training_proportion=0.8, period='1y', 
         'epsilon': epsilon,
         'lambda_reg': lambda_reg,
     }
-    
+
     save_model(tuned_model, save_path, hyperparams)
 
     return tuned_model
-
-
-def optimize_hyperparameters(model, train_loader, test_loader):
-    pass
-
 
 def predict(model, sample, mean, std, lookback=10, forecast_days=5):
     model.eval()
@@ -180,7 +167,6 @@ def predict(model, sample, mean, std, lookback=10, forecast_days=5):
         preds_denorm = preds * std[3] + mean[3]
 
     return preds_denorm
-
 
 def predict_future(model, ticker: str, lookback=10, forecast_days=5, period='1y'):
     samples, means, stds, dates, sample_tickers = get_samples(
@@ -209,7 +195,7 @@ def predict_future(model, ticker: str, lookback=10, forecast_days=5, period='1y'
 
 
 def get_loaders(tickers: list[str], training_proportion, period='1y', lookback=10, forecast_days=5):
-    print(f"Number of stocks: {len(tickers)}")
+    print(f"Training on the following {len(tickers)} stocks/ETFs: {tickers}")
 
     all_samples, all_means, all_stds, all_dates, all_tickers = {}, {}, {}, {}, {}
 
@@ -261,42 +247,30 @@ def get_loaders(tickers: list[str], training_proportion, period='1y', lookback=1
 
     return train_loader, test_loader, testing_samples
 
-
 if __name__ == "__main__":
-    print('hello, world!')
-    print('number of cores: ', os.cpu_count())
+    print('number of cores:', os.cpu_count())
 
     # hyperparameters
     lookback = 60
     forecast_days = 5
     hidden_size = 128
     batch_size = 32
-    epochs = 10
+    epochs = 15
     epsilon = 0.01
     lambda_reg = 1e-7
 
     data_collection_period = '5y'
     training_proportion = 0.8
 
-    tickers = [
-        # sector etfs
-        'SPY', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLRE', 'XLU', 'XLC', 'SOXX', 'QTUM'
-    ]
-
-    tech = [
-        'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META', 'NVDA', 'TSLA', 'AVGO', 'ORCL', 'PLTR'
-    ]
-
-    quantum = [
-        'IONQ', 'RGTI', 'QBTS', 'ARQQ', 'QUBT'
-    ]
+    tickers = ['SPY', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLRE', 'XLU', 'XLC', 'SOXX', 'QTUM'] # sector etfs
+    tech = ['AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META', 'NVDA', 'TSLA', 'AVGO', 'ORCL', 'PLTR']
+    quantum = ['IONQ', 'RGTI', 'QBTS', 'ARQQ', 'QUBT']
 
     # Model save paths
     BASE_MODEL_PATH = os.path.join(MODELS_DIR, 'base_model.pt')
-    
+
     retrain = True
 
-    # Hyperparameters dict to save with model
     base_hyperparams = {
         'input_size': 5,
         'hidden_size': hidden_size,
@@ -312,7 +286,6 @@ if __name__ == "__main__":
     }
 
     if retrain:
-        # Create new model and train from scratch
         model = StockLSTM(input_size=5, hidden_size=hidden_size, forecast_days=forecast_days)
 
         train_loader, test_loader, testing_samples = get_loaders(
@@ -325,11 +298,9 @@ if __name__ == "__main__":
             model, train_loader, test_loader,
             epochs=epochs, epsilon=epsilon, lambda_reg=lambda_reg
         )
-        
-        # Save the trained base model
+
         save_model(trained_model, BASE_MODEL_PATH, base_hyperparams)
     else:
-        # Load the saved model
         print("Loading saved model...")
         trained_model = load_model(
             BASE_MODEL_PATH,
@@ -337,18 +308,17 @@ if __name__ == "__main__":
             hidden_size=hidden_size,
             forecast_days=forecast_days
         )
-        
-        # Still need testing_samples for visualization if needed
+
         _, _, testing_samples = get_loaders(
             tickers, training_proportion,
             period=data_collection_period, lookback=lookback,
             forecast_days=forecast_days
         )
 
-    future_aapl_preds = predict_future(trained_model, 'AAPL', lookback=lookback, forecast_days=forecast_days)
-    visualize_future(future_aapl_preds, ticker='AAPL', lookback=lookback)
+    future_aapl_preds = predict_future(trained_model, 'NVDA', lookback=lookback, forecast_days=forecast_days)
+    visualize_future(future_aapl_preds, ticker='NVDA', lookback=lookback)
 
-    # Fine-tune on tech stocks
+    # tune on tech stocks
     tech_model = tune_model(
         trained_model,
         tech,
@@ -357,12 +327,17 @@ if __name__ == "__main__":
         lookback=lookback,
         forecast_days=forecast_days,
         model_name='tech_tuned'
+    ) if retrain else load_model(
+        MODELS_DIR + '/tech_tuned.pt',
+        input_size=5,
+        hidden_size=hidden_size,
+        forecast_days=forecast_days
     )
 
-    tuned_future_aapl_preds = predict_future(tech_model, 'AAPL', lookback=lookback, forecast_days=forecast_days)
-    visualize_future(tuned_future_aapl_preds, ticker='AAPL', lookback=lookback)
+    tuned_future_aapl_preds = predict_future(tech_model, 'NVDA', lookback=lookback, forecast_days=forecast_days)
+    visualize_future(tuned_future_aapl_preds, ticker='NVDA', lookback=lookback)
 
-    # Fine-tune on quantum stocks
+    # tune on quantum
     quantum_model = tune_model(
         trained_model,
         quantum,
@@ -371,6 +346,11 @@ if __name__ == "__main__":
         lookback=lookback,
         forecast_days=forecast_days,
         model_name='quantum_tuned'
+    ) if retrain else load_model(
+        MODELS_DIR + '/quantum_tuned.pt',
+        input_size=5,
+        hidden_size=hidden_size,
+        forecast_days=forecast_days
     )
 
     future_ionq_preds = predict_future(quantum_model, 'IONQ', lookback=lookback, forecast_days=forecast_days)
