@@ -254,7 +254,7 @@ if __name__ == "__main__":
     lookback = 60
     forecast_days = 5
     hidden_size = 128
-    batch_size = 32
+    batch_size = 64
     epochs = 15
     epsilon = 0.01
     lambda_reg = 1e-7
@@ -263,7 +263,30 @@ if __name__ == "__main__":
     data_collection_period = '5y'
     training_proportion = 0.8
 
-    tickers = ['SPY', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLRE', 'XLU', 'XLC', 'SOXX', 'QTUM'] # sector etfs
+    tickers = [
+        # core etfs (broad market & sectors)
+        'SPY',  # s&p 500
+        'XLK',  # tech
+        'XLF',  # financial
+        'XLV',  # healthcare
+        'XLE',  # energy
+        'XLI',  # industrials
+        'XLY',  # consumer
+        'XLRE',  # real estate
+        'XLU',  # utilities
+        'XLC',  # communication
+        'SOXX',  # semiconductors
+        'QTUM',  # quantum
+
+        # satellite etfs (global & style exposure)
+        'EFA',  # developed international equities
+        'EEM',  # emerging markets
+        'IWM',  # small-cap u.s. equities
+
+        'GLD',  # gold
+        'SLV',  # silver
+    ]
+
     tech = ['AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META', 'NVDA', 'TSLA', 'AVGO', 'ORCL', 'PLTR']
     quantum = ['IONQ', 'RGTI', 'QBTS', 'ARQQ', 'QUBT']
 
@@ -284,7 +307,7 @@ if __name__ == "__main__":
         'lambda_reg': lambda_reg,
     }
 
-    retrain = False
+    retrain = True
 
     if retrain:
         model = StockLSTM(input_size=5, hidden_size=hidden_size, num_layers=num_layers, forecast_days=forecast_days)
@@ -339,23 +362,23 @@ if __name__ == "__main__":
     visualize_future(tuned_future_aapl_preds, ticker='NVDA', lookback=lookback)
 
     # tune on quantum
-    quantum_model = tune_model(
-        trained_model,
-        quantum,
-        training_proportion=training_proportion,
-        period=data_collection_period,
-        lookback=lookback,
-        forecast_days=forecast_days,
-        model_name='quantum_tuned'
-    ) if retrain else load_model(
-        MODELS_DIR + '/quantum_tuned.pt',
-        input_size=5,
-        hidden_size=hidden_size,
-        forecast_days=forecast_days
-    )
-
-    future_ionq_preds = predict_future(quantum_model, 'IONQ', lookback=lookback, forecast_days=forecast_days)
-    visualize_future(future_ionq_preds, ticker='IONQ', lookback=lookback)
+    # quantum_model = tune_model(
+    #     trained_model,
+    #     quantum,
+    #     training_proportion=training_proportion,
+    #     period=data_collection_period,
+    #     lookback=lookback,
+    #     forecast_days=forecast_days,
+    #     model_name='quantum_tuned'
+    # ) if retrain else load_model(
+    #     MODELS_DIR + '/quantum_tuned.pt',
+    #     input_size=5,
+    #     hidden_size=hidden_size,
+    #     forecast_days=forecast_days
+    # )
+    #
+    # future_ionq_preds = predict_future(quantum_model, 'IONQ', lookback=lookback, forecast_days=forecast_days)
+    # visualize_future(future_ionq_preds, ticker='IONQ', lookback=lookback)
 
     train_loader, test_loader, _ = get_loaders(
         tickers, training_proportion,
