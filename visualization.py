@@ -199,4 +199,5 @@ def visualize_pca(model, data_loader, lookback=60, input_size=5):
     )
 
     print(f'Variance: {pca.explained_variance_ratio_}')
+    print(f'Sum of variance across first 2 dimensions: {sum(pca.explained_variance_ratio_)}')
     fig.show()

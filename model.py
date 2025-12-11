@@ -156,7 +156,7 @@ def tune_model(model, tickers: list[str], training_proportion=0.8, period='1y', 
 
     return tuned_model
 
-def predict(model, sample, mean, std, lookback=10, forecast_days=5):
+def predict(model, sample, mean, std, lookback=10):
     model.eval()
     with torch.no_grad():
         x = torch.tensor(sample[:lookback], dtype=torch.float32).unsqueeze(0).to(device)
@@ -284,7 +284,7 @@ if __name__ == "__main__":
         'lambda_reg': lambda_reg,
     }
 
-    retrain = True
+    retrain = False
 
     if retrain:
         model = StockLSTM(input_size=5, hidden_size=hidden_size, num_layers=num_layers, forecast_days=forecast_days)
