@@ -20,7 +20,7 @@ def save_model(model, filepath):
 def load_model(model, filepath):
     pass
 
-def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.005, lambda_reg=0.0001):
+def train_model(model, tickers, training_proportion=0.8, lookback=120, forecast_days=20, epochs=10, epsilon=0.005, lambda_reg=0.0001):
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=epsilon)
     criterion = nn.MSELoss()
@@ -29,71 +29,22 @@ def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.005, lamb
         epoch_start_time = time.time()
 
         model.train()
-        train_loss = 0.0
-        for x, y, base_price in train_loader:
-            x, y = x.to(device), y.to(device)
+        train_loss = 0.
 
-            optimizer.zero_grad()
-            preds = model(x)
-
-            loss = criterion(preds, y)
-
-            l2_reg = sum(torch.sum(p ** 2) for p in model.parameters())
-            loss = loss + lambda_reg * l2_reg
-
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item() * x.size(0)
-
-        train_loss /= len(train_loader.dataset)
-
-        model.eval()
-        test_loss = 0.0
-        with torch.no_grad():
-            for x, y, base_price in test_loader:
-                x, y = x.to(device), y.to(device)
-                preds = model(x)
-
-                loss = criterion(preds, y)
-                test_loss += loss.item() * x.size(0)
-
-            test_loss /= len(test_loader.dataset)
-
-        epoch_time = time.time() - epoch_start_time
-
-        train_rmse = np.sqrt(train_loss)
-        test_rmse = np.sqrt(test_loss)
-
-        print(f"Epoch {epoch + 1}/{epochs} | Train RMSE: {train_rmse:.4f} | Test RMSE: {test_rmse:.4f} | Time: {epoch_time:.2f}s")
-
-    return model
-
-def tune_model(model, tickers: list[str], training_proportion=0.8, period='1y', lookback=10, forecast_days=5,
-               epochs=2, epsilon=0.01, lambda_reg=0.0001, save_path=None, model_name=None):
-    # tuned_model = train_model(
-    #     model,
-    #     train_loader,
-    #     test_loader,
-    #     epochs=epochs,
-    #     epsilon=epsilon,
-    #     lambda_reg=lambda_reg
-    # )
-    #
-    # return tuned_model
-    pass
-
+def tune_model(base_model, tickers: list[str], training_proportion=0.2, lookback=120, forecast_days=20, epochs=2, epsilon=0.01, lambda_reg=0.0001):
+    return train_model(base_model, tickers, training_proportion, lookback, forecast_days, epochs, epsilon, lambda_reg)
 
 def predict(model, forecast_days=5):
     pass
 
-def get_loaders(data_file_name, training_proportion=0.8, period='1y', lookback=120, forecast_days=30):
+def get_loaders(file_name, training_proportion=0.8, lookback=120, forecast_days=30):
     pass
 
 if __name__ == "__main__":
     print('number of cores:', os.cpu_count())
 
     # hyperparameters
+    input_size = 5
     lookback = 120
     forecast_days = 15
     hidden_size = 128
@@ -115,3 +66,5 @@ if __name__ == "__main__":
     BASE_MODEL_PATH = os.path.join(MODELS_DIR, 'base_model.pt')
 
     get_samples("base_etf_set_data.csv", base_etf_set)
+
+    model = StockLSTM()
