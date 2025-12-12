@@ -12,5 +12,5 @@ def display_chart(ticker: str, period: str = '1mo', interval: str = '1d'):
     plt.tight_layout()
     plt.show()
 
-def get_samples(ticker: str, period='5y', lookback=120, forecast_days=20, cache_dir="stock_data"):
+def get_samples(file_name: str, tickers: list[str], period='5y', lookback=120, forecast_days=20, cache_dir="stock_data"):
     pass
