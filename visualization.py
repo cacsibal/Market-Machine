@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-
 def visualize_test(predictions, actuals, historical_prices=None, dates=None, ticker='SPY'):
     plt.figure(figsize=(12, 6))
 
@@ -24,6 +23,7 @@ def visualize_test(predictions, actuals, historical_prices=None, dates=None, tic
             pred_x = range(len(predictions))
             x_values = list(pred_x)
 
+
     if historical_prices is not None:
         plt.plot(historical_x, historical_prices, label="Historical", marker="o", color="blue", alpha=0.7)
 
@@ -31,8 +31,7 @@ def visualize_test(predictions, actuals, historical_prices=None, dates=None, tic
     plt.plot(pred_x, actuals, label="Actuals", marker="s", color="green", linewidth=2)
 
     if historical_prices is not None:
-        plt.axvline(x=historical_x[-1] if historical_x else -0.5, color='red', linestyle='--', linewidth=1.5, alpha=0.5,
-                    label="Forecast Start")
+        plt.axvline(x=historical_x[-1] if historical_x else -0.5, color='red', linestyle='--', linewidth=1.5, alpha=0.5, label="Forecast Start")
     else:
         plt.axvline(x=-0.5, color='red', linestyle='--', linewidth=1.5, alpha=0.5, label="Forecast Start")
 
@@ -54,13 +53,11 @@ def visualize_test(predictions, actuals, historical_prices=None, dates=None, tic
     plt.tight_layout()
     plt.show()
 
-
 def visualize_future(predictions, ticker='SPY', lookback=60, period='1y'):
     from yfinance_test import get_samples
     import numpy as np
 
-    # Get samples with percent changes
-    samples, base_prices, dates, _ = get_samples(
+    samples, means, stds, dates, _ = get_samples(
         ticker,
         period=period,
         lookback=lookback,
@@ -68,21 +65,12 @@ def visualize_future(predictions, ticker='SPY', lookback=60, period='1y'):
     )
 
     latest_sample = samples[-1]
-    latest_base_price = base_prices[-1]
+    latest_mean = means[-1]
+    latest_std = stds[-1]
     latest_dates = dates[-1]
 
-    # Convert historical percent changes back to prices
-    historical_pct = latest_sample[:lookback, 3]
-    historical_prices = np.zeros(len(historical_pct))
-
-    # Work backwards to find the starting price
-    # We know the last price in lookback is latest_base_price
-    # So we work backwards: price[t-1] = price[t] / (1 + pct_change[t])
-    current_price = latest_base_price
-    for i in range(len(historical_pct) - 1, -1, -1):
-        historical_prices[i] = current_price
-        if i > 0:
-            current_price = current_price / (1 + historical_pct[i])
+    historical_norm = latest_sample[:lookback, 3]
+    historical_prices = historical_norm * latest_std[3] + latest_mean[3]
 
     historical_dates = latest_dates[:lookback].tolist()
 
@@ -123,7 +111,6 @@ def visualize_future(predictions, ticker='SPY', lookback=60, period='1y'):
     plt.tight_layout()
     plt.show()
 
-
 def visualize_pca(model, data_loader, lookback=60, input_size=5):
     import torch
     import plotly.graph_objects as go
@@ -136,15 +123,12 @@ def visualize_pca(model, data_loader, lookback=60, input_size=5):
 
     model.eval()
     with torch.no_grad():
-        # Updated to match new dataset structure: (x, y, base_price)
-        for x, _, _ in data_loader:
+        for x, _, _, _ in data_loader:
             x = x.to(device)
             preds = model(x)
 
-            # Average prediction across forecast days
             pred_scalar = preds.mean(dim=1).cpu().numpy()
 
-            # Flatten input for PCA
             flat_input = x.cpu().numpy().reshape(x.shape[0], -1)
 
             all_inputs.append(flat_input)
@@ -183,7 +167,7 @@ def visualize_pca(model, data_loader, lookback=60, input_size=5):
         colorscale='Viridis',
         opacity=0.8,
         name='Model Landscape',
-        colorbar=dict(title='Predicted % Change')
+        colorbar=dict(title='Predicted Price (Norm)')
     ))
 
     fig.add_trace(go.Scatter3d(
@@ -198,15 +182,15 @@ def visualize_pca(model, data_loader, lookback=60, input_size=5):
             opacity=0.9
         ),
         name='Actual Samples',
-        hovertemplate='PC1: %{x:.2f}<br>PC2: %{y:.2f}<br>Pred: %{z:.3f}%<extra></extra>'
+        hovertemplate='PC1: %{x:.2f}<br>PC2: %{y:.2f}<br>Pred: %{z:.2f}<extra></extra>'
     ))
 
     fig.update_layout(
-        title='PCA Visualization of Model Predictions (% Change Space)',
+        title='PCA for g(x)',
         scene=dict(
             xaxis_title='Principal Component 1',
             yaxis_title='Principal Component 2',
-            zaxis_title='Model Prediction (% Change)',
+            zaxis_title='Model Prediction (yhat)',
             aspectmode='cube'
         ),
         width=1000,
