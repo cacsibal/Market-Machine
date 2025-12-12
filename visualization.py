@@ -1,231 +1,214 @@
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
 import numpy as np
-from datetime import datetime, timedelta
-import yfinance as yf
 import torch
+import plotly.graph_objects as go
+from sklearn.decomposition import PCA
 
+def visualize_test(predictions, actuals, historical_prices=None, dates=None, ticker='SPY'):
+    plt.figure(figsize=(12, 6))
 
-def plot_mse_loss(train_losses, test_losses):
-    plt.plot(train_losses, label='Train Loss')
-    plt.plot(test_losses, label='Test Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('MSE Loss')
-    plt.legend()
-    plt.show()
-
-
-def plot_feature_chart(data_dict, start_idx=0, num_days=30, ticker_name="Stock"):
-    """
-    Plot OHLCV features from the dataset.
-
-    Args:
-        data_dict: Dictionary with 'normalized', 'close_prices', and 'dates' keys
-        start_idx: Starting index for the plot
-        num_days: Number of days to plot
-        ticker_name: Name of the stock for the title
-    """
-    normalized = data_dict['normalized']
-    close_prices = data_dict['close_prices']
-    dates = data_dict.get('dates', None)
-
-    end_idx = min(start_idx + num_days, len(normalized))
-    plot_data = normalized[start_idx:end_idx]
-    plot_closes = close_prices[start_idx:end_idx]
-
-    if dates is not None:
-        plot_dates = dates[start_idx:end_idx]
+    if historical_prices is not None:
+        if dates is not None and len(dates) == len(historical_prices) + len(predictions):
+            historical_dates = dates[:len(historical_prices)]
+            prediction_dates = dates[len(historical_prices):]
+            x_values = historical_dates + prediction_dates
+            historical_x = historical_dates
+            pred_x = prediction_dates
+        else:
+            historical_x = range(-len(historical_prices), 0)
+            pred_x = range(len(predictions))
+            x_values = list(historical_x) + list(pred_x)
     else:
-        plot_dates = np.arange(len(plot_data))
+        if dates is not None and len(dates) == len(predictions):
+            pred_x = dates
+            x_values = dates
+        else:
+            pred_x = range(len(predictions))
+            x_values = list(pred_x)
 
-    fig, axes = plt.subplots(3, 1, figsize=(14, 10))
+    if historical_prices is not None:
+        plt.plot(historical_x, historical_prices, label="Historical", color="blue", alpha=0.7)
 
-    if dates is not None:
-        fig.suptitle(
-            f'{ticker_name} - Features ({plot_dates[0].strftime("%Y-%m-%d")} to {plot_dates[-1].strftime("%Y-%m-%d")})',
-            fontsize=16)
+    plt.plot(pred_x, predictions, label="Predictions", marker="o", color="orange", linewidth=2)
+    plt.plot(pred_x, actuals, label="Actuals", marker="s", color="green", linewidth=2)
+
+    if historical_prices is not None:
+        plt.axvline(x=historical_x[-1] if historical_x else -0.5, color='red', linestyle='--', linewidth=1.5, alpha=0.5,
+                    label="Forecast Start")
     else:
-        fig.suptitle(f'{ticker_name} - Features (Days {start_idx} to {end_idx})', fontsize=16)
+        plt.axvline(x=-0.5, color='red', linestyle='--', linewidth=1.5, alpha=0.5, label="Forecast Start")
 
-    # Plot 1: Normalized OHLC
-    ax1 = axes[0]
-    ax1.plot(plot_dates, plot_data[:, 0], label='Open (normalized)', alpha=0.7)
-    ax1.plot(plot_dates, plot_data[:, 1], label='High (normalized)', alpha=0.7)
-    ax1.plot(plot_dates, plot_data[:, 2], label='Low (normalized)', alpha=0.7)
-    ax1.plot(plot_dates, plot_data[:, 3], label='Close (normalized)', alpha=0.7, linewidth=2)
-    ax1.set_ylabel('Normalized Price')
-    ax1.set_title('Normalized OHLC (relative to daily open)')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    ax1.axhline(y=0, color='k', linestyle='--', alpha=0.3)
-    if dates is not None:
-        fig.autofmt_xdate()
-
-    # Plot 2: Actual Close Prices
-    ax2 = axes[1]
-    ax2.plot(plot_dates, plot_closes, color='blue', linewidth=2)
-    ax2.set_ylabel('Close Price ($)')
-    ax2.set_title('Actual Close Prices')
-    ax2.grid(True, alpha=0.3)
-
-    # Plot 3: Normalized Volume
-    ax3 = axes[2]
-    ax3.bar(plot_dates, plot_data[:, 4], alpha=0.6, color='purple')
-    ax3.set_xlabel('Date' if dates else 'Days')
-    ax3.set_ylabel('Normalized Volume')
-    ax3.set_title('Normalized Volume (z-score)')
-    ax3.grid(True, alpha=0.3)
-    ax3.axhline(y=0, color='k', linestyle='--', alpha=0.3)
-
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_training_history(train_losses, val_losses):
-    """Plot training and validation loss over epochs."""
-    plt.figure(figsize=(10, 6))
-    plt.plot(train_losses, label='Train Loss')
-    plt.plot(val_losses, label='Val Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('MSE Loss')
-    plt.title('Training History')
+    plt.xlabel("Date")
+    plt.ylabel("Price ($)")
+    plt.title(f"Stock Price Predictions vs Actuals for {ticker}")
     plt.legend()
     plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
 
-
-def print_training_results(results):
-    """Print training results and metrics."""
-    print(f"\nFinal Results:")
-    print(f"Best Validation Loss: {results['best_val_loss']:.6f}")
-    print(f"Test Loss: {results['test_loss']:.6f}")
-
-    if results['test_predictions'] is not None and results['test_targets'] is not None:
-        from sklearn.metrics import mean_absolute_error, r2_score
-
-        print(f"\nPer-day metrics:")
-        for day in range(results['test_predictions'].shape[1]):
-            mae = mean_absolute_error(results['test_targets'][:, day], results['test_predictions'][:, day])
-            r2 = r2_score(results['test_targets'][:, day], results['test_predictions'][:, day])
-            print(f"  Day {day + 1}: MAE = {mae:.6f} ({mae * 100:.2f}%), R² = {r2:.6f}")
-
-        # Overall metrics
-        mae_overall = mean_absolute_error(results['test_targets'].flatten(), results['test_predictions'].flatten())
-        r2_overall = r2_score(results['test_targets'].flatten(), results['test_predictions'].flatten())
-        print(f"\nOverall: MAE = {mae_overall:.6f} ({mae_overall * 100:.2f}%), R² = {r2_overall:.6f}")
-
-
-def plot_prediction_results(predicted_closes, actual_closes, forecast_dates, last_known_close, ticker_name,
-                            dates_available=True):
-    """Plot predicted vs actual close prices with error analysis."""
-    fig, axes = plt.subplots(2, 1, figsize=(12, 10))
-    fig.suptitle(f'{ticker_name} - {len(predicted_closes)} Day Price Prediction', fontsize=16)
-
-    # Plot 1: Predicted vs Actual Close Prices
-    ax1 = axes[0]
-    ax1.plot(forecast_dates, actual_closes, 'o-', label='Actual', linewidth=2, markersize=8, color='blue')
-    ax1.plot(forecast_dates, predicted_closes, 's--', label='Predicted', linewidth=2, markersize=8, color='red')
-    ax1.axhline(y=last_known_close, color='green', linestyle=':', linewidth=2,
-                label=f'Last Known Close (${last_known_close:.2f})')
-    ax1.set_ylabel('Close Price ($)')
-    ax1.set_title('Predicted vs Actual Close Prices')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    if dates_available:
-        ax1.tick_params(axis='x', rotation=45)
-
-    # Plot 2: Prediction Errors
-    ax2 = axes[1]
-    errors = predicted_closes - actual_closes
-    error_pct = (errors / actual_closes) * 100
-    colors = ['red' if e > 0 else 'green' for e in errors]
-    ax2.bar(forecast_dates, error_pct, color=colors, alpha=0.6)
-    ax2.axhline(y=0, color='black', linestyle='-', linewidth=1)
-    ax2.set_xlabel('Date' if dates_available else 'Day')
-    ax2.set_ylabel('Prediction Error (%)')
-    ax2.set_title('Prediction Errors (Predicted - Actual)')
-    ax2.grid(True, alpha=0.3)
-    if dates_available:
-        ax2.tick_params(axis='x', rotation=45)
-
-    plt.tight_layout()
-    plt.show()
-
-
-def print_prediction_results(predicted_closes, actual_closes, forecast_dates, last_known_close, ticker_name,
-                             dates_available=True):
-    """Print prediction results in a formatted table."""
-    errors = predicted_closes - actual_closes
-    error_pct = (errors / actual_closes) * 100
-
-    print(f"\n{ticker_name} Predictions:")
-    print(f"Last Known Close: ${last_known_close:.2f}")
-    print(f"\n{'Day':<5} {'Date':<12} {'Actual':<10} {'Predicted':<10} {'Error':<10} {'Error %':<10}")
-    print("-" * 70)
-
-    for i in range(len(predicted_closes)):
-        if dates_available:
-            date_str = forecast_dates[i].strftime('%Y-%m-%d')
-        else:
-            date_str = str(i + 1)
-        print(
-            f"{i + 1:<5} {date_str:<12} ${actual_closes[i]:<9.2f} ${predicted_closes[i]:<9.2f} ${errors[i]:<9.2f} {error_pct[i]:<9.2f}%")
-
-    # Calculate metrics
-    mae = np.mean(np.abs(errors))
-    mape = np.mean(np.abs(error_pct))
-    rmse = np.sqrt(np.mean(errors ** 2))
-
-    print(f"\nMetrics:")
-    print(f"  MAE:  ${mae:.2f}")
-    print(f"  MAPE: {mape:.2f}%")
-    print(f"  RMSE: ${rmse:.2f}")
-
-    return mae, mape, rmse
-
-
-def plot_future_prediction(predicted_closes, forecast_dates, close_prices, dates, ticker_name):
-    """Plot future predictions along with historical data."""
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    # Plot historical data (last 30 days)
-    if dates is not None:
-        hist_dates = dates[-30:]
-        hist_closes = close_prices[-30:]
-        dates_available = True
+    if dates is not None and len(dates) == len(historical_prices) + len(predictions):
+        tick_indices = range(0, len(x_values), max(1, len(x_values) // 8))
+        plt.xticks([x_values[i] for i in tick_indices], [dates[i] for i in tick_indices], rotation=45, ha='right')
+    elif dates is not None and len(dates) == len(predictions):
+        tick_indices = range(0, len(dates), max(1, len(dates) // 5))
+        plt.xticks([dates[i] for i in tick_indices], [dates[i] for i in tick_indices], rotation=45, ha='right')
     else:
-        hist_dates = list(range(-29, 1))
-        hist_closes = close_prices[-30:]
-        dates_available = False
+        pass
 
-    ax.plot(hist_dates, hist_closes, 'o-', label='Historical', linewidth=2, markersize=6, color='blue')
-    ax.plot(forecast_dates, predicted_closes, 's--', label='Predicted', linewidth=2, markersize=8, color='red')
-    ax.axvline(x=hist_dates[-1], color='gray', linestyle=':', linewidth=2, alpha=0.5)
+    plt.tight_layout()
+    plt.show()
 
-    ax.set_xlabel('Date' if dates_available else 'Day')
-    ax.set_ylabel('Close Price ($)')
-    ax.set_title(f'{ticker_name} - Future Price Prediction ({len(predicted_closes)} Days)')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    if dates_available:
-        fig.autofmt_xdate()
+def visualize_future(predictions, ticker='SPY', lookback=60, period='1y'):
+    from yfinance_test import get_samples
+
+    # Updated to receive base_prices instead of means/stds
+    samples, base_prices, dates, _ = get_samples(
+        ticker,
+        period=period,
+        lookback=lookback,
+        forecast_days=len(predictions)
+    )
+
+    latest_sample = samples[-1]  # Shape: (lookback + forecast, features)
+    latest_base_price = base_prices[-1]  # Scalar: Price at t=lookback-1
+    latest_dates = dates[-1]
+
+    # Reconstruct Historical Prices from Returns
+    # latest_sample[:lookback, 3] are the returns leading up to the base_price
+    # We work BACKWARDS from the base_price to fill history
+    historical_returns = latest_sample[:lookback, 3]
+    historical_prices = []
+
+    curr = latest_base_price
+    # P_{t-1} = P_t / (1 + r_t)
+    for r in reversed(historical_returns):
+        curr = curr / (1 + r)
+        historical_prices.append(curr)
+
+    historical_prices.reverse()  # Flip back to chronological order
+
+    historical_dates = latest_dates[:lookback].tolist()
+    prediction_indices = list(range(lookback, lookback + len(predictions)))
+
+    plt.figure(figsize=(14, 7))
+
+    plt.plot(range(len(historical_prices)), historical_prices,
+             label="Historical", marker="o", color="blue", alpha=0.7, markersize=3)
+
+    plt.plot(prediction_indices, predictions,
+             label="Predictions", marker="o", color="orange", linewidth=2.5, markersize=6)
+
+    plt.axvline(x=len(historical_prices) - 0.5, color='red', linestyle='--',
+                linewidth=2, alpha=0.6, label="Forecast Start")
+
+    # Connect the last historical point to the first prediction
+    plt.plot([len(historical_prices) - 1, lookback],
+             [historical_prices[-1], predictions[0]],
+             color='gray', linestyle=':', alpha=0.5, linewidth=1.5)
+
+    plt.xlabel("Time", fontsize=12)
+    plt.ylabel("Price ($)", fontsize=12)
+    plt.title(f"Future Price Predictions for {ticker} (Next {len(predictions)} Days)", fontsize=14, fontweight='bold')
+    plt.legend(fontsize=11)
+    plt.grid(True, alpha=0.3)
+
+    num_ticks = 10
+    tick_indices = np.linspace(0, len(historical_prices) - 1, num_ticks // 2, dtype=int)
+    tick_labels = [historical_dates[i] for i in tick_indices]
+    tick_positions = list(tick_indices)
+
+    for i, pred_idx in enumerate(prediction_indices):
+        tick_positions.append(pred_idx)
+        tick_labels.append(f"Day +{i + 1}")
+
+    plt.xticks(tick_positions, tick_labels, rotation=45, ha='right')
 
     plt.tight_layout()
     plt.show()
 
 
-def print_future_prediction(predicted_closes, forecast_dates, last_known_close, ticker_name, dates_available=True):
-    """Print future prediction results."""
-    print(f"\n{ticker_name} Future Predictions:")
-    print(f"Current Close: ${last_known_close:.2f}")
-    print(f"\n{'Day':<5} {'Date':<12} {'Predicted Price':<15} {'Change':<10} {'Change %':<10}")
-    print("-" * 65)
+def visualize_pca(model, data_loader, lookback=60, input_size=5):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    for i in range(len(predicted_closes)):
-        if dates_available:
-            date_str = forecast_dates[i].strftime('%Y-%m-%d')
-        else:
-            date_str = str(i + 1)
-        change = predicted_closes[i] - last_known_close
-        change_pct = (change / last_known_close) * 100
-        print(f"{i + 1:<5} {date_str:<12} ${predicted_closes[i]:<14.2f} ${change:<9.2f} {change_pct:<9.2f}%")
+    all_inputs = []
+    all_preds = []
+
+    model.eval()
+    with torch.no_grad():
+        for x, _, _ in data_loader:
+            x = x.to(device)
+            preds = model(x)
+
+            # preds are now returns, take mean return as scalar proxy for "magnitude of movement"
+            pred_scalar = preds.mean(dim=1).cpu().numpy()
+
+            flat_input = x.cpu().numpy().reshape(x.shape[0], -1)
+
+            all_inputs.append(flat_input)
+            all_preds.append(pred_scalar)
+
+    X_flat = np.concatenate(all_inputs, axis=0)
+    y_pred = np.concatenate(all_preds, axis=0)
+
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X_flat)
+
+    x_min, x_max = X_pca[:, 0].min(), X_pca[:, 0].max()
+    y_min, y_max = X_pca[:, 1].min(), X_pca[:, 1].max()
+
+    padding = 1.0
+    x_range = np.linspace(x_min - padding, x_max + padding, 50)
+    y_range = np.linspace(y_min - padding, y_max + padding, 50)
+    xx, yy = np.meshgrid(x_range, y_range)
+
+    grid_points = np.c_[xx.ravel(), yy.ravel()]
+
+    synthetic_flat = pca.inverse_transform(grid_points)
+    synthetic_inputs = synthetic_flat.reshape(-1, lookback, input_size)
+    synthetic_tensor = torch.tensor(synthetic_inputs, dtype=torch.float32).to(device)
+
+    with torch.no_grad():
+        grid_preds = model(synthetic_tensor)
+        grid_z = grid_preds.mean(dim=1).cpu().numpy()
+
+    Z = grid_z.reshape(xx.shape)
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Surface(
+        z=Z, x=xx, y=yy,
+        colorscale='Viridis',
+        opacity=0.8,
+        name='Model Landscape',
+        colorbar=dict(title='Predicted Return')
+    ))
+
+    fig.add_trace(go.Scatter3d(
+        x=X_pca[:, 0],
+        y=X_pca[:, 1],
+        z=y_pred,
+        mode='markers',
+        marker=dict(
+            size=3,
+            color=y_pred,
+            colorscale='Plasma',
+            opacity=0.9
+        ),
+        name='Actual Samples',
+        hovertemplate='PC1: %{x:.2f}<br>PC2: %{y:.2f}<br>Pred Return: %{z:.4f}<extra></extra>'
+    ))
+
+    fig.update_layout(
+        title='PCA for g(x) [Returns Space]',
+        scene=dict(
+            xaxis_title='Principal Component 1',
+            yaxis_title='Principal Component 2',
+            zaxis_title='Predicted Mean Return',
+            aspectmode='manual',
+        ),
+        width=1000,
+        height=800,
+        margin=dict(r=20, l=10, b=10, t=40)
+    )
+
+    print(f'Variance: {pca.explained_variance_ratio_}')
+    print(f'Sum of variance across first 2 dimensions: {sum(pca.explained_variance_ratio_)}')
+    fig.show()

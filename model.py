@@ -1,358 +1,357 @@
-from pathlib import Path
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 import torch.nn as nn
-import yfinance as yf
-from torch.utils.data import ConcatDataset
-from datetime import timedelta
+import os
+import time
+from datetime import datetime
 
-from StockChartDataset import StockChartDataset
+from StockDataset import StockDataset
 from StockLSTM import StockLSTM
-from visualization import (
-    plot_feature_chart,
-    plot_training_history,
-    print_training_results,
-    plot_prediction_results,
-    print_prediction_results,
-    plot_future_prediction,
-    print_future_prediction
-)
+from visualization import visualize_test, visualize_future, visualize_pca
+from yfinance_test import get_samples
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+MODELS_DIR = 'saved_models'
 
-def build_stock_dataset(ticker: str, period: str = '7300d', interval='1d'):
-    stock = yf.Ticker(ticker)
-    df = stock.history(period=period, interval=interval)
-
-    if df.empty:
-        print(f"No data for {ticker}")
-        return None
-
-    features = df[['Open', 'High', 'Low', 'Close', 'Volume']].values
-
-    if len(features) == 0:
-        print(f"No valid data for {ticker}")
-        return None
-
-    daily_charts = features.astype(np.float32)
-    original_close = daily_charts[:, 3].copy()
-    normalized = normalize_features(daily_charts)
-
-    return {
-        'normalized': normalized,
-        'close_prices': original_close,
-        'dates': df.index.tolist()
+def save_model(model, filepath, hyperparams=None):
+    os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else MODELS_DIR, exist_ok=True)
+    save_dict = {
+        'model_state_dict': model.state_dict(),
+        'timestamp': datetime.now().isoformat(),
     }
+    if hyperparams:
+        save_dict['hyperparams'] = hyperparams
+    torch.save(save_dict, filepath)
+    print(f"Model saved to: {filepath}")
 
-def normalize_features(daily_data):
-    normalized = daily_data.copy()
+def load_model(filepath, input_size=5, hidden_size=128, forecast_days=5, num_layers=3, dropout=0.2):
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"No saved model found at: {filepath}")
 
-    for i in range(len(daily_data)):
-        open_price = daily_data[i, 0]
-        normalized[i, :4] = (daily_data[i, :4] / open_price) - 1
+    checkpoint = torch.load(filepath, map_location=device, weights_only=False)
 
-        if daily_data[i, 4] > 0:
-            normalized[i, 4] = np.log(daily_data[i, 4] + 1)
-        else:
-            normalized[i, 4] = 0
+    if 'hyperparams' in checkpoint:
+        hp = checkpoint['hyperparams']
+        input_size = hp.get('input_size', input_size)
+        hidden_size = hp.get('hidden_size', hidden_size)
+        forecast_days = hp.get('forecast_days', forecast_days)
+        num_layers = hp.get('num_layers', num_layers)
+        dropout = hp.get('dropout', dropout)
 
-    volume_col = normalized[:, 4]
-    vol_mean = volume_col.mean()
-    vol_std = volume_col.std()
-    if vol_std > 0:
-        normalized[:, 4] = (volume_col - vol_mean) / vol_std
-
-    return normalized
-
-def train(dataset: ConcatDataset, forecast_days=5):
-    from torch.utils.data import DataLoader, random_split
-
-    train_size = int(0.7 * len(dataset))
-    val_size = int(0.15 * len(dataset))
-    test_size = len(dataset) - train_size - val_size
-
-    train_dataset, val_dataset, test_dataset = random_split(
-        dataset,
-        [train_size, val_size, test_size],
-        generator=torch.manual_seed(42)
+    model = StockLSTM(
+        input_size=input_size,
+        hidden_size=hidden_size,
+        forecast_days=forecast_days,
+        num_layers=num_layers,
+        dropout=dropout
     )
 
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model = model.to(device)
 
-    model = StockLSTM(input_size=5, hidden_size=64, num_layers=2, forecast_days=forecast_days).to(device)
+    timestamp = checkpoint.get('timestamp', 'unknown')
+    print(f"Model loaded from: {filepath} (saved at: {timestamp})")
 
+    return model
+
+def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.005, lambda_reg=0.0001):
+    model = model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=epsilon)
     criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    train_losses = []
-    val_losses = []
-    best_val_loss = float('inf')
-    best_model_state = None
+    for epoch in range(epochs):
+        epoch_start_time = time.time()
 
-    num_epochs = 50
-    for epoch in range(num_epochs):
         model.train()
-        train_loss = 0
-        for X_batch, y_batch in train_loader:
-            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-
-            predictions = model(X_batch)
-            loss = criterion(predictions, y_batch)
+        train_loss = 0.0
+        for x, y, base_price in train_loader:
+            x, y = x.to(device), y.to(device)
 
             optimizer.zero_grad()
+            preds = model(x)
+
+            loss = criterion(preds, y)
+
+            l2_reg = sum(torch.sum(p ** 2) for p in model.parameters())
+            loss = loss + lambda_reg * l2_reg
+
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
-            train_loss += loss.item()
+            train_loss += loss.item() * x.size(0)
+
+        train_loss /= len(train_loader.dataset)
 
         model.eval()
-        val_loss = 0
+        test_loss = 0.0
         with torch.no_grad():
-            for X_batch, y_batch in val_loader:
-                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-                predictions = model(X_batch)
-                val_loss += criterion(predictions, y_batch).item()
+            for x, y, base_price in test_loader:
+                x, y = x.to(device), y.to(device)
+                preds = model(x)
 
-        avg_train_loss = train_loss / len(train_loader)
-        avg_val_loss = val_loss / len(val_loader)
+                loss = criterion(preds, y)
+                test_loss += loss.item() * x.size(0)
 
-        train_losses.append(avg_train_loss)
-        val_losses.append(avg_val_loss)
+            test_loss /= len(test_loader.dataset)
 
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            best_model_state = model.state_dict().copy()
+        epoch_time = time.time() - epoch_start_time
 
-        print(f"Epoch {epoch + 1}/{num_epochs} - Train Loss: {avg_train_loss:.6f}, Val Loss: {avg_val_loss:.6f}")
+        train_rmse = np.sqrt(train_loss)
+        test_rmse = np.sqrt(test_loss)
 
-    model.load_state_dict(best_model_state)
+        print(f"Epoch {epoch + 1}/{epochs} | Train RMSE: {train_rmse:.4f} | Test RMSE: {test_rmse:.4f} | Time: {epoch_time:.2f}s")
 
-    model.eval()
-    test_loss = 0
-    all_predictions = []
-    all_targets = []
+    return model
 
-    with torch.no_grad():
-        for X_batch, y_batch in test_loader:
-            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-            predictions = model(X_batch)
-            test_loss += criterion(predictions, y_batch).item()
+def tune_model(model, tickers: list[str], training_proportion=0.8, period='1y', lookback=10, forecast_days=5,
+               epochs=2, epsilon=0.01, lambda_reg=0.0001, save_path=None, model_name=None):
+    train_loader, test_loader, _ = get_loaders(
+        tickers,
+        training_proportion=training_proportion,
+        period=period, lookback=lookback,
+        forecast_days=forecast_days
+    )
 
-            all_predictions.append(predictions.cpu().numpy())
-            all_targets.append(y_batch.cpu().numpy())
+    tuned_model = train_model(
+        model,
+        train_loader,
+        test_loader,
+        epochs=epochs,
+        epsilon=epsilon,
+        lambda_reg=lambda_reg
+    )
 
-    avg_test_loss = test_loss / len(test_loader)
-    print(f"\nTest Loss: {avg_test_loss:.6f}")
+    if model_name is None:
+        ticker_str = '_'.join(tickers[:3])
+        if len(tickers) > 3:
+            ticker_str += f'_+{len(tickers) - 3}more'
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        model_name = f"tuned_{ticker_str}_{timestamp}"
 
-    return {
-        'model': model,
-        'train_losses': train_losses,
-        'val_losses': val_losses,
-        'test_loss': avg_test_loss,
-        'test_predictions': np.concatenate(all_predictions, axis=0),
-        'test_targets': np.concatenate(all_targets, axis=0),
-        'best_val_loss': best_val_loss
+    if save_path is None:
+        save_path = os.path.join(MODELS_DIR, f"{model_name}.pt")
+
+    hyperparams = {
+        'input_size': 5,
+        'hidden_size': model.lstm.hidden_size,
+        'forecast_days': forecast_days,
+        'num_layers': model.lstm.num_layers,
+        'dropout': model.lstm.dropout,
+        'lookback': lookback,
+        'tickers': tickers,
+        'period': period,
+        'epochs': epochs,
+        'epsilon': epsilon,
+        'lambda_reg': lambda_reg,
     }
 
+    save_model(tuned_model, save_path, hyperparams)
+    return tuned_model
 
-def predict(model, data_dict, lookback=10, forecast_days=5, ticker_name="Stock"):
-    """Make predictions on historical data and return results."""
+
+def predict(model, sample, base_price, lookback=10):
     model.eval()
+    with torch.no_grad():
+        x = torch.tensor(sample[:lookback], dtype=torch.float32).unsqueeze(0).to(device)
 
-    normalized = data_dict['normalized']
-    close_prices = data_dict['close_prices']
-    dates = data_dict.get('dates', None)
+        preds_returns = model(x)  # Shape: (1, forecast_days)
+        preds_returns = preds_returns.squeeze(0).cpu().numpy()
 
-    if len(normalized) < lookback + forecast_days:
-        raise ValueError(f"Not enough data. Need at least {lookback + forecast_days} days")
+    # Reconstruct prices from returns: P_t = P_{t-1} * (1 + r_t)
+    predicted_prices = []
+    current_price = base_price
+    for r in preds_returns:
+        current_price = current_price * (1 + r)
+        predicted_prices.append(current_price)
 
-    X = normalized[-lookback - forecast_days:-forecast_days]
-    last_known_close = close_prices[-forecast_days - 1]
-    actual_future_closes = close_prices[-forecast_days:]
+    return np.array(predicted_prices)
 
-    X_tensor = torch.tensor(X, dtype=torch.float32).unsqueeze(0).to(device)
+
+def predict_future(model, ticker: str, lookback=60, forecast_days=5, period='5y'):
+    samples, base_prices, dates, sample_tickers = get_samples(
+        ticker,
+        period=period,
+        lookback=lookback,
+        forecast_days=forecast_days
+    )
+
+    latest_sample = samples[-1]
+    latest_base_price = base_prices[-1]
+
+    model.eval()
+    model = model.to(device)
 
     with torch.no_grad():
-        prediction = model(X_tensor)
-        prediction = prediction.squeeze(0).cpu().numpy()
+        x = torch.tensor(latest_sample[:lookback], dtype=torch.float32).unsqueeze(0).to(device)
+        preds_returns = model(x).squeeze(0).cpu().numpy()
 
-    predicted_closes = last_known_close * (1 + prediction)
-    actual_normalized = (actual_future_closes - last_known_close) / last_known_close
+    predicted_prices = []
+    current_price = latest_base_price
+    for r in preds_returns:
+        current_price = current_price * (1 + r)
+        predicted_prices.append(current_price)
 
-    if dates is not None:
-        last_date = dates[-forecast_days - 1]
-        forecast_dates = []
-        current_date = last_date
-        for _ in range(forecast_days):
-            current_date += timedelta(days=1)
-            while current_date.weekday() >= 5:
-                current_date += timedelta(days=1)
-            forecast_dates.append(current_date)
-    else:
-        forecast_dates = list(range(1, forecast_days + 1))
-
-    # Use visualization functions
-    plot_prediction_results(predicted_closes, actual_future_closes, forecast_dates,
-                           last_known_close, ticker_name, dates is not None)
-    mae, mape, rmse = print_prediction_results(predicted_closes, actual_future_closes,
-                                               forecast_dates, last_known_close,
-                                               ticker_name, dates is not None)
-
-    return {
-        'predicted_closes': predicted_closes,
-        'actual_closes': actual_future_closes,
-        'predicted_returns': prediction,
-        'actual_returns': actual_normalized,
-        'forecast_dates': forecast_dates,
-        'last_known_close': last_known_close,
-        'mae': mae,
-        'mape': mape,
-        'rmse': rmse
-    }
+    return np.array(predicted_prices)
 
 
-def predict_future(model, data_dict, lookback=10, forecast_days=5, ticker_name="Stock"):
-    """Predict future prices (when we don't have actual values yet)."""
-    model.eval()
+def get_loaders(tickers: list[str], training_proportion=0.8, period='5y', lookback=60, forecast_days=5):
+    print(f"Training on the following {len(tickers)} stocks/ETFs: {tickers}")
 
-    normalized = data_dict['normalized']
-    close_prices = data_dict['close_prices']
-    dates = data_dict.get('dates', None)
+    all_samples, all_base_prices, all_dates, all_tickers = {}, {}, {}, {}
 
-    if len(normalized) < lookback:
-        raise ValueError(f"Not enough data. Need at least {lookback} days")
+    for ticker in tickers:
+        samples, base_prices, dates, sample_tickers = get_samples(
+            ticker,
+            period=period,
+            lookback=lookback,
+            forecast_days=forecast_days
+        )
 
-    X = normalized[-lookback:]
-    last_known_close = close_prices[-1]
+        all_samples[ticker] = samples
+        all_base_prices[ticker] = base_prices
+        all_dates[ticker] = dates
+        all_tickers[ticker] = sample_tickers
 
-    X_tensor = torch.tensor(X, dtype=torch.float32).unsqueeze(0).to(device)
+    X = np.concatenate(list(all_samples.values()), axis=0)
+    B = np.concatenate(list(all_base_prices.values()), axis=0)
+    D = np.concatenate(list(all_dates.values()), axis=0)
+    T = np.concatenate(list(all_tickers.values()), axis=0)
 
-    with torch.no_grad():
-        prediction = model(X_tensor)
-        prediction = prediction.squeeze(0).cpu().numpy()
+    perm = np.random.permutation(len(X))
 
-    predicted_closes = last_known_close * (1 + prediction)
+    X_shuffled = X[perm]
+    B_shuffled = B[perm]
+    D_shuffled = D[perm]
+    T_shuffled = T[perm]
 
-    if dates is not None:
-        last_date = dates[-1]
-        forecast_dates = []
-        current_date = last_date
-        for _ in range(forecast_days):
-            current_date += timedelta(days=1)
-            while current_date.weekday() >= 5:
-                current_date += timedelta(days=1)
-            forecast_dates.append(current_date)
-    else:
-        forecast_dates = list(range(1, forecast_days + 1))
+    num_training_samples = int(training_proportion * len(X))
 
-    # Use visualization functions
-    plot_future_prediction(predicted_closes, forecast_dates, close_prices, dates, ticker_name)
-    print_future_prediction(predicted_closes, forecast_dates, last_known_close,
-                          ticker_name, dates is not None)
+    training_samples = [X_shuffled[:num_training_samples], B_shuffled[:num_training_samples],
+                        D_shuffled[:num_training_samples], T_shuffled[:num_training_samples]]
 
-    return {
-        'predicted_closes': predicted_closes,
-        'predicted_returns': prediction,
-        'forecast_dates': forecast_dates,
-        'last_known_close': last_known_close
-    }
+    testing_samples = [X_shuffled[num_training_samples:], B_shuffled[num_training_samples:],
+                       D_shuffled[num_training_samples:], T_shuffled[num_training_samples:]]
+
+    d_train = StockDataset(training_samples, lookback=lookback, forecast_days=forecast_days)
+    d_test = StockDataset(testing_samples, lookback=lookback, forecast_days=forecast_days)
+
+    print(f"Total training examples: {len(d_train)}")
+    print(f"Total test examples: {len(d_test)}")
+
+    batch_size = 64
+    train_loader = DataLoader(d_train, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(d_test, batch_size=batch_size, shuffle=False)
+
+    return train_loader, test_loader, testing_samples
 
 
 if __name__ == "__main__":
-    print('hello, world!')
+    print('number of cores:', os.cpu_count())
+
+    # hyperparameters
+    lookback = 120
+    forecast_days = 15
+    hidden_size = 128
+    batch_size = 64
+    epochs = 5
+    epsilon = 0.01
+    lambda_reg = 1e-7
+    num_layers = 3
+
+    data_collection_period = '5y'
+    training_proportion = 0.8
 
     tickers = [
-        'NVDA', 'INTC', 'MU', 'TSM', 'TXN', 'AVGO'
+        'SPY', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLRE', 'XLU', 'XLC', 'SOXX', 'QTUM',
+        'EFA', 'EEM', 'IWM', 'GLD', 'SLV'
     ]
 
-    all_stock_data = {}
+    tech = ['AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META', 'NVDA', 'TSLA', 'AVGO', 'ORCL', 'PLTR']
 
-    for ticker in tickers:
-        print(f"Processing {ticker}...")
-        all_stock_data[ticker] = build_stock_dataset(ticker)
+    BASE_MODEL_PATH = os.path.join(MODELS_DIR, 'base_model.pt')
 
-    datasets = []
-    for ticker, data in all_stock_data.items():
-        if data is not None:
-            dataset = StockChartDataset(data, lookback=10, forecast_days=5)
-            datasets.append(dataset)
+    base_hyperparams = {
+        'input_size': 5,
+        'hidden_size': hidden_size,
+        'forecast_days': forecast_days,
+        'num_layers': num_layers,
+        'dropout': 0.2,
+        'lookback': lookback,
+        'tickers': tickers,
+        'period': data_collection_period,
+        'epochs': epochs,
+        'epsilon': epsilon,
+        'lambda_reg': lambda_reg,
+    }
 
-    combined_dataset = ConcatDataset(datasets)
+    retrain = True
 
-    Path('models').mkdir(exist_ok=True)
-    checkpoint_path = 'models/stock_lstm_checkpoint.pt'
+    if retrain:
+        model = StockLSTM(input_size=5, hidden_size=hidden_size, num_layers=num_layers, forecast_days=forecast_days)
 
-    if Path(checkpoint_path).exists():
-        print(f"\nLoading existing model from {checkpoint_path}...")
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+        train_loader, test_loader, testing_samples = get_loaders(tickers, training_proportion, lookback=lookback, forecast_days=forecast_days)
 
-        model = StockLSTM(**checkpoint['model_config']).to(device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model.eval()
+        trained_model = train_model(
+            model, train_loader, test_loader)
 
-        results = {
-            'model': model,
-            'train_losses': checkpoint['train_losses'],
-            'val_losses': checkpoint['val_losses'],
-            'test_loss': checkpoint['test_loss'],
-            'best_val_loss': checkpoint['best_val_loss'],
-            'test_predictions': None,
-            'test_targets': None
-        }
-
-        print(f"Model loaded successfully!")
-        print(f"Previous Best Validation Loss: {results['best_val_loss']:.6f}")
-        print(f"Previous Test Loss: {results['test_loss']:.6f}")
-
+        save_model(trained_model, BASE_MODEL_PATH, base_hyperparams)
     else:
-        print("\nNo existing model found. Training new model...")
-        print(f"\nTotal samples: {len(combined_dataset)}")
-
-        results = train(combined_dataset)
-
-        model_path = 'models/stock_lstm.pt'
-        torch.save(results['model'].state_dict(), model_path)
-        print(f"\nModel saved to {model_path}")
-
-        torch.save({
-            'model_state_dict': results['model'].state_dict(),
-            'train_losses': results['train_losses'],
-            'val_losses': results['val_losses'],
-            'test_loss': results['test_loss'],
-            'best_val_loss': results['best_val_loss'],
-            'model_config': {
-                'input_size': 5,
-                'hidden_size': 64,
-                'num_layers': 2,
-                'forecast_days': 5
-            }
-        }, checkpoint_path)
-        print(f"Full checkpoint saved to {checkpoint_path}")
-
-        print_training_results(results)
-        plot_training_history(results['train_losses'], results['val_losses'])
-
-    # plot_feature_chart(all_stock_data['AAPL'], ticker_name='AAPL')
-
-    for ticker in ['NVDA', 'AVGO', 'MU']:
-        # print("\n=== Testing Predictions on Historical Data ===")
-        # prediction_results = predict(
-        #     model=results['model'],
-        #     data_dict=all_stock_data[ticker],
-        #     lookback=10,
-        #     forecast_days=5,
-        #     ticker_name=ticker
-        # )
-
-        print("\n=== Predicting Future Prices ===")
-        future_results = predict_future(
-            model=results['model'],
-            data_dict=all_stock_data[ticker],
-            lookback=10,
-            forecast_days=5,
-            ticker_name=ticker
+        print("Loading saved model...")
+        trained_model = load_model(
+            BASE_MODEL_PATH,
+            input_size=5,
+            hidden_size=hidden_size,
+            forecast_days=forecast_days
         )
+
+        _, _, testing_samples = get_loaders(tickers)
+
+    print('\n')
+
+    for i in range(5):
+        sample = testing_samples[0][i]
+        base_price = testing_samples[1][i]
+        dates = testing_samples[2][i]
+        viz_ticker = testing_samples[3][i]
+
+        preds = predict(trained_model, sample, base_price, lookback=lookback)
+
+        actual_returns = sample[lookback:, 3]
+        actuals = []
+        curr = base_price
+        for r in actual_returns:
+            curr = curr * (1 + r)
+            actuals.append(curr)
+
+        hist_returns = sample[:lookback, 3]
+        historical_prices = []
+        curr = base_price
+        # P_{t-1} = P_t / (1 + r_t)
+        for r in reversed(hist_returns):
+            curr = curr / (1 + r)
+            historical_prices.append(curr)
+        historical_prices.reverse()
+
+        historical_dates = dates[:lookback].tolist()
+        prediction_dates = dates[lookback:].tolist()
+        plot_dates = historical_dates + prediction_dates
+
+        print(f"--- Visualization Sample {i + 1} ({viz_ticker}) ---")
+        print("Predicted next 5 days:", [float(f"{p:.2f}") for p in preds])
+        print("Actual next 5 days:", [float(f"{a:.2f}") for a in actuals])
+
+        visualize_test(preds, actuals, historical_prices, dates=plot_dates, ticker=viz_ticker)
+
+        print(f"Prediction MSE (on Price): {np.mean(np.square(np.array(preds) - np.array(actuals))):.4f}")
+        print("\n")
+
+    # train_loader, test_loader, _ = get_loaders(tickers)
+    #
+    # visualize_pca(
+    #     model=trained_model,
+    #     data_loader=test_loader,
+    #     lookback=60,
+    #     input_size=5
+    # )
