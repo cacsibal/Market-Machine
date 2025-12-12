@@ -169,7 +169,7 @@ def predict(model, sample, base_price, lookback=10):
     return np.array(predicted_prices)
 
 
-def predict_future(model, ticker: str, lookback=10, forecast_days=5, period='1y'):
+def predict_future(model, ticker: str, lookback=60, forecast_days=5, period='5y'):
     samples, base_prices, dates, sample_tickers = get_samples(
         ticker,
         period=period,
@@ -196,7 +196,7 @@ def predict_future(model, ticker: str, lookback=10, forecast_days=5, period='1y'
     return np.array(predicted_prices)
 
 
-def get_loaders(tickers: list[str], training_proportion, period='1y', lookback=10, forecast_days=5):
+def get_loaders(tickers: list[str], training_proportion=0.8, period='5y', lookback=60, forecast_days=5):
     print(f"Training on the following {len(tickers)} stocks/ETFs: {tickers}")
 
     all_samples, all_base_prices, all_dates, all_tickers = {}, {}, {}, {}
@@ -251,11 +251,11 @@ if __name__ == "__main__":
     print('number of cores:', os.cpu_count())
 
     # hyperparameters
-    lookback = 60
-    forecast_days = 5
+    lookback = 120
+    forecast_days = 15
     hidden_size = 128
     batch_size = 64
-    epochs = 10
+    epochs = 5
     epsilon = 0.01
     lambda_reg = 1e-7
     num_layers = 3
@@ -286,21 +286,15 @@ if __name__ == "__main__":
         'lambda_reg': lambda_reg,
     }
 
-    retrain = False
+    retrain = True
 
     if retrain:
         model = StockLSTM(input_size=5, hidden_size=hidden_size, num_layers=num_layers, forecast_days=forecast_days)
 
-        train_loader, test_loader, testing_samples = get_loaders(
-            tickers, training_proportion,
-            period=data_collection_period, lookback=lookback,
-            forecast_days=forecast_days
-        )
+        train_loader, test_loader, testing_samples = get_loaders(tickers, training_proportion, lookback=lookback, forecast_days=forecast_days)
 
         trained_model = train_model(
-            model, train_loader, test_loader,
-            epochs=epochs, epsilon=epsilon, lambda_reg=lambda_reg
-        )
+            model, train_loader, test_loader)
 
         save_model(trained_model, BASE_MODEL_PATH, base_hyperparams)
     else:
@@ -312,11 +306,7 @@ if __name__ == "__main__":
             forecast_days=forecast_days
         )
 
-        _, _, testing_samples = get_loaders(
-            tickers, training_proportion,
-            period=data_collection_period, lookback=lookback,
-            forecast_days=forecast_days
-        )
+        _, _, testing_samples = get_loaders(tickers)
 
     print('\n')
 
@@ -357,17 +347,11 @@ if __name__ == "__main__":
         print(f"Prediction MSE (on Price): {np.mean(np.square(np.array(preds) - np.array(actuals))):.4f}")
         print("\n")
 
-    train_loader, test_loader, _ = get_loaders(
-        tickers,
-        training_proportion=0.8,
-        period='5y',
-        lookback=60,
-        forecast_days=5
-    )
-
-    visualize_pca(
-        model=trained_model,
-        data_loader=test_loader,
-        lookback=60,
-        input_size=5
-    )
+    # train_loader, test_loader, _ = get_loaders(tickers)
+    #
+    # visualize_pca(
+    #     model=trained_model,
+    #     data_loader=test_loader,
+    #     lookback=60,
+    #     input_size=5
+    # )

@@ -33,8 +33,7 @@ def get_samples(ticker: str, period='2y', lookback=10, forecast_days=5, cache_di
         sample_tickers: np.array of shape (N,)
     """
     os.makedirs(cache_dir, exist_ok=True)
-    # Added _pct suffix to distinguish from old normalized cache files
-    cache_file = os.path.join(cache_dir, f"{ticker}_{period}_{lookback}_{forecast_days}_pct.csv")
+    cache_file = os.path.join(cache_dir, f"{ticker}_{period}_{lookback}_{forecast_days}.csv")
 
     if os.path.exists(cache_file):
         try:

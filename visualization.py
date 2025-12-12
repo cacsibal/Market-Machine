@@ -4,13 +4,7 @@ import torch
 import plotly.graph_objects as go
 from sklearn.decomposition import PCA
 
-
 def visualize_test(predictions, actuals, historical_prices=None, dates=None, ticker='SPY'):
-    """
-    Visualizes test results.
-    Expects 'predictions', 'actuals', and 'historical_prices' to be absolute price values
-    (already reconstructed from returns by the caller).
-    """
     plt.figure(figsize=(12, 6))
 
     if historical_prices is not None:
@@ -33,7 +27,7 @@ def visualize_test(predictions, actuals, historical_prices=None, dates=None, tic
             x_values = list(pred_x)
 
     if historical_prices is not None:
-        plt.plot(historical_x, historical_prices, label="Historical", marker="o", color="blue", alpha=0.7)
+        plt.plot(historical_x, historical_prices, label="Historical", color="blue", alpha=0.7)
 
     plt.plot(pred_x, predictions, label="Predictions", marker="o", color="orange", linewidth=2)
     plt.plot(pred_x, actuals, label="Actuals", marker="s", color="green", linewidth=2)
@@ -62,12 +56,7 @@ def visualize_test(predictions, actuals, historical_prices=None, dates=None, tic
     plt.tight_layout()
     plt.show()
 
-
 def visualize_future(predictions, ticker='SPY', lookback=60, period='1y'):
-    """
-    Visualizes future predictions.
-    Fetches the latest data, reconstructs historical prices from returns, and plots the forecast.
-    """
     from yfinance_test import get_samples
 
     # Updated to receive base_prices instead of means/stds
