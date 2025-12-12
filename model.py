@@ -8,53 +8,15 @@ from datetime import datetime
 
 from StockDataset import StockDataset
 from StockLSTM import StockLSTM
-from visualization import visualize_test, visualize_future, visualize_pca
-from yfinance_test import get_samples
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 MODELS_DIR = 'saved_models'
 
-def save_model(model, filepath, hyperparams=None):
-    os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else MODELS_DIR, exist_ok=True)
-    save_dict = {
-        'model_state_dict': model.state_dict(),
-        'timestamp': datetime.now().isoformat(),
-    }
-    if hyperparams:
-        save_dict['hyperparams'] = hyperparams
-    torch.save(save_dict, filepath)
-    print(f"Model saved to: {filepath}")
+def save_model(model, filepath):
+    pass
 
-def load_model(filepath, input_size=5, hidden_size=128, forecast_days=5, num_layers=3, dropout=0.2):
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(f"No saved model found at: {filepath}")
-
-    checkpoint = torch.load(filepath, map_location=device, weights_only=False)
-
-    if 'hyperparams' in checkpoint:
-        hp = checkpoint['hyperparams']
-        input_size = hp.get('input_size', input_size)
-        hidden_size = hp.get('hidden_size', hidden_size)
-        forecast_days = hp.get('forecast_days', forecast_days)
-        num_layers = hp.get('num_layers', num_layers)
-        dropout = hp.get('dropout', dropout)
-
-    model = StockLSTM(
-        input_size=input_size,
-        hidden_size=hidden_size,
-        forecast_days=forecast_days,
-        num_layers=num_layers,
-        dropout=dropout
-    )
-
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model = model.to(device)
-
-    timestamp = checkpoint.get('timestamp', 'unknown')
-    print(f"Model loaded from: {filepath} (saved at: {timestamp})")
-
-    return model
+def load_model(model, filepath):
 
 def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.005, lambda_reg=0.0001):
     model = model.to(device)
@@ -107,13 +69,6 @@ def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.005, lamb
 
 def tune_model(model, tickers: list[str], training_proportion=0.8, period='1y', lookback=10, forecast_days=5,
                epochs=2, epsilon=0.01, lambda_reg=0.0001, save_path=None, model_name=None):
-    train_loader, test_loader, _ = get_loaders(
-        tickers,
-        training_proportion=training_proportion,
-        period=period, lookback=lookback,
-        forecast_days=forecast_days
-    )
-
     tuned_model = train_model(
         model,
         train_loader,
@@ -123,129 +78,17 @@ def tune_model(model, tickers: list[str], training_proportion=0.8, period='1y', 
         lambda_reg=lambda_reg
     )
 
-    if model_name is None:
-        ticker_str = '_'.join(tickers[:3])
-        if len(tickers) > 3:
-            ticker_str += f'_+{len(tickers) - 3}more'
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        model_name = f"tuned_{ticker_str}_{timestamp}"
-
-    if save_path is None:
-        save_path = os.path.join(MODELS_DIR, f"{model_name}.pt")
-
-    hyperparams = {
-        'input_size': 5,
-        'hidden_size': model.lstm.hidden_size,
-        'forecast_days': forecast_days,
-        'num_layers': model.lstm.num_layers,
-        'dropout': model.lstm.dropout,
-        'lookback': lookback,
-        'tickers': tickers,
-        'period': period,
-        'epochs': epochs,
-        'epsilon': epsilon,
-        'lambda_reg': lambda_reg,
-    }
-
-    save_model(tuned_model, save_path, hyperparams)
     return tuned_model
 
 
-def predict(model, sample, base_price, lookback=10):
-    model.eval()
-    with torch.no_grad():
-        x = torch.tensor(sample[:lookback], dtype=torch.float32).unsqueeze(0).to(device)
+def predict(model, forecast_days=5):
+    pass
 
-        preds_returns = model(x)  # Shape: (1, forecast_days)
-        preds_returns = preds_returns.squeeze(0).cpu().numpy()
-
-    # Reconstruct prices from returns: P_t = P_{t-1} * (1 + r_t)
-    predicted_prices = []
-    current_price = base_price
-    for r in preds_returns:
-        current_price = current_price * (1 + r)
-        predicted_prices.append(current_price)
-
-    return np.array(predicted_prices)
-
-
-def predict_future(model, ticker: str, lookback=60, forecast_days=5, period='5y'):
-    samples, base_prices, dates, sample_tickers = get_samples(
-        ticker,
-        period=period,
-        lookback=lookback,
-        forecast_days=forecast_days
-    )
-
-    latest_sample = samples[-1]
-    latest_base_price = base_prices[-1]
-
-    model.eval()
-    model = model.to(device)
-
-    with torch.no_grad():
-        x = torch.tensor(latest_sample[:lookback], dtype=torch.float32).unsqueeze(0).to(device)
-        preds_returns = model(x).squeeze(0).cpu().numpy()
-
-    predicted_prices = []
-    current_price = latest_base_price
-    for r in preds_returns:
-        current_price = current_price * (1 + r)
-        predicted_prices.append(current_price)
-
-    return np.array(predicted_prices)
-
+def get_loaders(tickers: list[str], training_proportion=0.8, period='1y', lookback=10, forecast_days=5):
+    pass
 
 def get_loaders(tickers: list[str], training_proportion=0.8, period='5y', lookback=60, forecast_days=5):
-    print(f"Training on the following {len(tickers)} stocks/ETFs: {tickers}")
-
-    all_samples, all_base_prices, all_dates, all_tickers = {}, {}, {}, {}
-
-    for ticker in tickers:
-        samples, base_prices, dates, sample_tickers = get_samples(
-            ticker,
-            period=period,
-            lookback=lookback,
-            forecast_days=forecast_days
-        )
-
-        all_samples[ticker] = samples
-        all_base_prices[ticker] = base_prices
-        all_dates[ticker] = dates
-        all_tickers[ticker] = sample_tickers
-
-    X = np.concatenate(list(all_samples.values()), axis=0)
-    B = np.concatenate(list(all_base_prices.values()), axis=0)
-    D = np.concatenate(list(all_dates.values()), axis=0)
-    T = np.concatenate(list(all_tickers.values()), axis=0)
-
-    perm = np.random.permutation(len(X))
-
-    X_shuffled = X[perm]
-    B_shuffled = B[perm]
-    D_shuffled = D[perm]
-    T_shuffled = T[perm]
-
-    num_training_samples = int(training_proportion * len(X))
-
-    training_samples = [X_shuffled[:num_training_samples], B_shuffled[:num_training_samples],
-                        D_shuffled[:num_training_samples], T_shuffled[:num_training_samples]]
-
-    testing_samples = [X_shuffled[num_training_samples:], B_shuffled[num_training_samples:],
-                       D_shuffled[num_training_samples:], T_shuffled[num_training_samples:]]
-
-    d_train = StockDataset(training_samples, lookback=lookback, forecast_days=forecast_days)
-    d_test = StockDataset(testing_samples, lookback=lookback, forecast_days=forecast_days)
-
-    print(f"Total training examples: {len(d_train)}")
-    print(f"Total test examples: {len(d_test)}")
-
-    batch_size = 64
-    train_loader = DataLoader(d_train, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(d_test, batch_size=batch_size, shuffle=False)
-
-    return train_loader, test_loader, testing_samples
-
+    return train_loader, test_loader
 
 if __name__ == "__main__":
     print('number of cores:', os.cpu_count())
@@ -259,7 +102,6 @@ if __name__ == "__main__":
     epsilon = 0.01
     lambda_reg = 1e-7
     num_layers = 3
-
     data_collection_period = '5y'
     training_proportion = 0.8
 
@@ -271,87 +113,3 @@ if __name__ == "__main__":
     tech = ['AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META', 'NVDA', 'TSLA', 'AVGO', 'ORCL', 'PLTR']
 
     BASE_MODEL_PATH = os.path.join(MODELS_DIR, 'base_model.pt')
-
-    base_hyperparams = {
-        'input_size': 5,
-        'hidden_size': hidden_size,
-        'forecast_days': forecast_days,
-        'num_layers': num_layers,
-        'dropout': 0.2,
-        'lookback': lookback,
-        'tickers': tickers,
-        'period': data_collection_period,
-        'epochs': epochs,
-        'epsilon': epsilon,
-        'lambda_reg': lambda_reg,
-    }
-
-    retrain = True
-
-    if retrain:
-        model = StockLSTM(input_size=5, hidden_size=hidden_size, num_layers=num_layers, forecast_days=forecast_days)
-
-        train_loader, test_loader, testing_samples = get_loaders(tickers, training_proportion, lookback=lookback, forecast_days=forecast_days)
-
-        trained_model = train_model(
-            model, train_loader, test_loader)
-
-        save_model(trained_model, BASE_MODEL_PATH, base_hyperparams)
-    else:
-        print("Loading saved model...")
-        trained_model = load_model(
-            BASE_MODEL_PATH,
-            input_size=5,
-            hidden_size=hidden_size,
-            forecast_days=forecast_days
-        )
-
-        _, _, testing_samples = get_loaders(tickers)
-
-    print('\n')
-
-    for i in range(5):
-        sample = testing_samples[0][i]
-        base_price = testing_samples[1][i]
-        dates = testing_samples[2][i]
-        viz_ticker = testing_samples[3][i]
-
-        preds = predict(trained_model, sample, base_price, lookback=lookback)
-
-        actual_returns = sample[lookback:, 3]
-        actuals = []
-        curr = base_price
-        for r in actual_returns:
-            curr = curr * (1 + r)
-            actuals.append(curr)
-
-        hist_returns = sample[:lookback, 3]
-        historical_prices = []
-        curr = base_price
-        # P_{t-1} = P_t / (1 + r_t)
-        for r in reversed(hist_returns):
-            curr = curr / (1 + r)
-            historical_prices.append(curr)
-        historical_prices.reverse()
-
-        historical_dates = dates[:lookback].tolist()
-        prediction_dates = dates[lookback:].tolist()
-        plot_dates = historical_dates + prediction_dates
-
-        print(f"--- Visualization Sample {i + 1} ({viz_ticker}) ---")
-        print("Predicted next 5 days:", [float(f"{p:.2f}") for p in preds])
-        print("Actual next 5 days:", [float(f"{a:.2f}") for a in actuals])
-
-        visualize_test(preds, actuals, historical_prices, dates=plot_dates, ticker=viz_ticker)
-
-        print(f"Prediction MSE (on Price): {np.mean(np.square(np.array(preds) - np.array(actuals))):.4f}")
-        print("\n")
-
-    # train_loader, test_loader, _ = get_loaders(tickers)
-    #
-    # visualize_pca(
-    #     model=trained_model,
-    #     data_loader=test_loader,
-    #     lookback=60,
-    #     input_size=5
-    # )
