@@ -87,12 +87,8 @@ def tune_model(model, tickers: list[str], training_proportion=0.8, period='1y', 
 def predict(model, forecast_days=5):
     pass
 
-def get_loaders(tickers: list[str], training_proportion=0.8, period='1y', lookback=10, forecast_days=5):
+def get_loaders(data_file_name, training_proportion=0.8, period='1y', lookback=120, forecast_days=30):
     pass
-
-def get_loaders(tickers: list[str], training_proportion=0.8, period='5y', lookback=60, forecast_days=5):
-    pass
-    # return train_loader, test_loader
 
 if __name__ == "__main__":
     print('number of cores:', os.cpu_count())
