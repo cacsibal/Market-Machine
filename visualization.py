@@ -1,7 +1,16 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
+import plotly.graph_objects as go
+from sklearn.decomposition import PCA
+
 
 def visualize_test(predictions, actuals, historical_prices=None, dates=None, ticker='SPY'):
+    """
+    Visualizes test results.
+    Expects 'predictions', 'actuals', and 'historical_prices' to be absolute price values
+    (already reconstructed from returns by the caller).
+    """
     plt.figure(figsize=(12, 6))
 
     if historical_prices is not None:
@@ -23,7 +32,6 @@ def visualize_test(predictions, actuals, historical_prices=None, dates=None, tic
             pred_x = range(len(predictions))
             x_values = list(pred_x)
 
-
     if historical_prices is not None:
         plt.plot(historical_x, historical_prices, label="Historical", marker="o", color="blue", alpha=0.7)
 
@@ -31,7 +39,8 @@ def visualize_test(predictions, actuals, historical_prices=None, dates=None, tic
     plt.plot(pred_x, actuals, label="Actuals", marker="s", color="green", linewidth=2)
 
     if historical_prices is not None:
-        plt.axvline(x=historical_x[-1] if historical_x else -0.5, color='red', linestyle='--', linewidth=1.5, alpha=0.5, label="Forecast Start")
+        plt.axvline(x=historical_x[-1] if historical_x else -0.5, color='red', linestyle='--', linewidth=1.5, alpha=0.5,
+                    label="Forecast Start")
     else:
         plt.axvline(x=-0.5, color='red', linestyle='--', linewidth=1.5, alpha=0.5, label="Forecast Start")
 
@@ -53,27 +62,41 @@ def visualize_test(predictions, actuals, historical_prices=None, dates=None, tic
     plt.tight_layout()
     plt.show()
 
-def visualize_future(predictions, ticker='SPY', lookback=60, period='1y'):
-    from yfinance_test import get_samples
-    import numpy as np
 
-    samples, means, stds, dates, _ = get_samples(
+def visualize_future(predictions, ticker='SPY', lookback=60, period='1y'):
+    """
+    Visualizes future predictions.
+    Fetches the latest data, reconstructs historical prices from returns, and plots the forecast.
+    """
+    from yfinance_test import get_samples
+
+    # Updated to receive base_prices instead of means/stds
+    samples, base_prices, dates, _ = get_samples(
         ticker,
         period=period,
         lookback=lookback,
         forecast_days=len(predictions)
     )
 
-    latest_sample = samples[-1]
-    latest_mean = means[-1]
-    latest_std = stds[-1]
+    latest_sample = samples[-1]  # Shape: (lookback + forecast, features)
+    latest_base_price = base_prices[-1]  # Scalar: Price at t=lookback-1
     latest_dates = dates[-1]
 
-    historical_norm = latest_sample[:lookback, 3]
-    historical_prices = historical_norm * latest_std[3] + latest_mean[3]
+    # Reconstruct Historical Prices from Returns
+    # latest_sample[:lookback, 3] are the returns leading up to the base_price
+    # We work BACKWARDS from the base_price to fill history
+    historical_returns = latest_sample[:lookback, 3]
+    historical_prices = []
+
+    curr = latest_base_price
+    # P_{t-1} = P_t / (1 + r_t)
+    for r in reversed(historical_returns):
+        curr = curr / (1 + r)
+        historical_prices.append(curr)
+
+    historical_prices.reverse()  # Flip back to chronological order
 
     historical_dates = latest_dates[:lookback].tolist()
-
     prediction_indices = list(range(lookback, lookback + len(predictions)))
 
     plt.figure(figsize=(14, 7))
@@ -87,6 +110,7 @@ def visualize_future(predictions, ticker='SPY', lookback=60, period='1y'):
     plt.axvline(x=len(historical_prices) - 0.5, color='red', linestyle='--',
                 linewidth=2, alpha=0.6, label="Forecast Start")
 
+    # Connect the last historical point to the first prediction
     plt.plot([len(historical_prices) - 1, lookback],
              [historical_prices[-1], predictions[0]],
              color='gray', linestyle=':', alpha=0.5, linewidth=1.5)
@@ -111,11 +135,8 @@ def visualize_future(predictions, ticker='SPY', lookback=60, period='1y'):
     plt.tight_layout()
     plt.show()
 
-def visualize_pca(model, data_loader, lookback=60, input_size=5):
-    import torch
-    import plotly.graph_objects as go
-    from sklearn.decomposition import PCA
 
+def visualize_pca(model, data_loader, lookback=60, input_size=5):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     all_inputs = []
@@ -123,10 +144,11 @@ def visualize_pca(model, data_loader, lookback=60, input_size=5):
 
     model.eval()
     with torch.no_grad():
-        for x, _, _, _ in data_loader:
+        for x, _, _ in data_loader:
             x = x.to(device)
             preds = model(x)
 
+            # preds are now returns, take mean return as scalar proxy for "magnitude of movement"
             pred_scalar = preds.mean(dim=1).cpu().numpy()
 
             flat_input = x.cpu().numpy().reshape(x.shape[0], -1)
@@ -167,7 +189,7 @@ def visualize_pca(model, data_loader, lookback=60, input_size=5):
         colorscale='Viridis',
         opacity=0.8,
         name='Model Landscape',
-        colorbar=dict(title='Predicted Price (Norm)')
+        colorbar=dict(title='Predicted Return')
     ))
 
     fig.add_trace(go.Scatter3d(
@@ -182,16 +204,16 @@ def visualize_pca(model, data_loader, lookback=60, input_size=5):
             opacity=0.9
         ),
         name='Actual Samples',
-        hovertemplate='PC1: %{x:.2f}<br>PC2: %{y:.2f}<br>Pred: %{z:.2f}<extra></extra>'
+        hovertemplate='PC1: %{x:.2f}<br>PC2: %{y:.2f}<br>Pred Return: %{z:.4f}<extra></extra>'
     ))
 
     fig.update_layout(
-        title='PCA for g(x)',
+        title='PCA for g(x) [Returns Space]',
         scene=dict(
             xaxis_title='Principal Component 1',
             yaxis_title='Principal Component 2',
-            zaxis_title='Model Prediction (yhat)',
-            aspectmode='cube'
+            zaxis_title='Predicted Mean Return',
+            aspectmode='manual',
         ),
         width=1000,
         height=800,
