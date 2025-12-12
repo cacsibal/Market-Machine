@@ -8,6 +8,7 @@ from datetime import datetime
 
 from StockDataset import StockDataset
 from StockLSTM import StockLSTM
+from yfinance_test import get_samples
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -17,6 +18,7 @@ def save_model(model, filepath):
     pass
 
 def load_model(model, filepath):
+    pass
 
 def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.005, lambda_reg=0.0001):
     model = model.to(device)
@@ -69,16 +71,17 @@ def train_model(model, train_loader, test_loader, epochs=10, epsilon=0.005, lamb
 
 def tune_model(model, tickers: list[str], training_proportion=0.8, period='1y', lookback=10, forecast_days=5,
                epochs=2, epsilon=0.01, lambda_reg=0.0001, save_path=None, model_name=None):
-    tuned_model = train_model(
-        model,
-        train_loader,
-        test_loader,
-        epochs=epochs,
-        epsilon=epsilon,
-        lambda_reg=lambda_reg
-    )
-
-    return tuned_model
+    # tuned_model = train_model(
+    #     model,
+    #     train_loader,
+    #     test_loader,
+    #     epochs=epochs,
+    #     epsilon=epsilon,
+    #     lambda_reg=lambda_reg
+    # )
+    #
+    # return tuned_model
+    pass
 
 
 def predict(model, forecast_days=5):
@@ -88,7 +91,8 @@ def get_loaders(tickers: list[str], training_proportion=0.8, period='1y', lookba
     pass
 
 def get_loaders(tickers: list[str], training_proportion=0.8, period='5y', lookback=60, forecast_days=5):
-    return train_loader, test_loader
+    pass
+    # return train_loader, test_loader
 
 if __name__ == "__main__":
     print('number of cores:', os.cpu_count())
@@ -105,7 +109,7 @@ if __name__ == "__main__":
     data_collection_period = '5y'
     training_proportion = 0.8
 
-    tickers = [
+    base_etf_set = [
         'SPY', 'XLK', 'XLF', 'XLV', 'XLE', 'XLI', 'XLY', 'XLRE', 'XLU', 'XLC', 'SOXX', 'QTUM',
         'EFA', 'EEM', 'IWM', 'GLD', 'SLV'
     ]
@@ -113,3 +117,5 @@ if __name__ == "__main__":
     tech = ['AAPL', 'MSFT', 'AMZN', 'GOOGL', 'META', 'NVDA', 'TSLA', 'AVGO', 'ORCL', 'PLTR']
 
     BASE_MODEL_PATH = os.path.join(MODELS_DIR, 'base_model.pt')
+
+    get_samples("base_etf_set_data.csv", base_etf_set)
